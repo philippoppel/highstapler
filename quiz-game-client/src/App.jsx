@@ -1,750 +1,1451 @@
-import React, { useState, useEffect } from 'react';
-import { Trophy, Coins, Users, HelpCircle, CheckCircle, XCircle, Wifi, WifiOff, AlertCircle, Sparkles, Heart, Shield, Zap, Star, TrendingUp, TrendingDown } from 'lucide-react';
-import io from 'socket.io-client';
+const express = require('express');
+const http = require('http');
+const socketIO = require('socket.io');
+const cors = require('cors');
+const axios = require('axios');
+const crypto = require('crypto');
+require('dotenv').config();
 
-// Socket-Verbindung (ändere URL für Production)
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
-let socket = null;
+const app = express();
+const server = http.createServer(app);
+const io = socketIO(server, {
+  cors: {
+    origin: [
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "https://highstapler.onrender.com",
+      "https://highstapler.vercel.app",
+      "https://highstapler-nis50caat-philipps-projects-0f51423d.vercel.app",
+      "https://*.vercel.app",
+      /^https:\/\/.*\.vercel\.app$/
+    ],
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
 
-const QuizGame = () => {
-  // Verbindungsstatus
-  const [connected, setConnected] = useState(false);
-  const [connectionError, setConnectionError] = useState('');
-  
-  // Spielzustand
-  const [gameState, setGameState] = useState('menu');
-  const [gameId, setGameId] = useState('');
-  const [playerRole, setPlayerRole] = useState(''); // host oder player2
-  const [gameRole, setGameRole] = useState(''); // challenger oder moderator
-  const [gameData, setGameData] = useState({});
-  
-  // Spielername
-  const [playerName, setPlayerName] = useState('');
-  const [joinGameId, setJoinGameId] = useState('');
-  
-  // Lokale UI-States
-  const [myAnswer, setMyAnswer] = useState('');
-  const [myAnswered, setMyAnswered] = useState(false);
-  const [animateScore, setAnimateScore] = useState(false);
-  const [animateCoins, setAnimateCoins] = useState(false);
-  const [showDecisionAnimation, setShowDecisionAnimation] = useState(false);
-  const [alreadyReconnected, setAlreadyReconnected] = useState(false);
+app.use(cors({
+  origin: [
+    "http://localhost:3000", 
+    "http://localhost:3001",
+    "https://highstapler.onrender.com",
+    "https://highstapler.vercel.app",
+    "https://highstapler-nis50caat-philipps-projects-0f51423d.vercel.app",
+    "https://*.vercel.app",
+    /^https:\/\/.*\.vercel\.app$/
+  ],
+  credentials: true
+}));
+app.use(express.json());
 
-  useEffect(() => {
-    const savedGameId = sessionStorage.getItem('gameId');
-    const savedPlayerName = sessionStorage.getItem('playerName');
-  
-    if (savedGameId && savedPlayerName && connected && !alreadyReconnected) {
-      console.log('Attempting to reconnect to game:', savedGameId);
-      setPlayerName(savedPlayerName);
-      setJoinGameId(savedGameId);
-  
-      setAlreadyReconnected(true);
-  
-      setTimeout(() => {
-        socket.emit('join-game', {
-          gameId: savedGameId,
-          playerName: savedPlayerName
-        });
-      }, 1000);
-    }
-  }, [connected, alreadyReconnected]);
-  
+// FIX: Korrigierte Route
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'Server läuft!', 
+    timestamp: new Date().toISOString(),
+    activeGames: games.size,
+    connectedPlayers: players.size
+  });
+});
 
-  // Socket.io Verbindung initialisieren
-  useEffect(() => {
-    socket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling']
-    });
-  
-    socket.on('connect', () => {
-      console.log('Verbunden mit Server');
-      setConnected(true);
-      setConnectionError('');
-    });
-  
-    socket.on('disconnect', () => {
-      console.log('Verbindung getrennt');
-      setConnected(false);
-    });
-  
-    socket.on('connect_error', (error) => {
-      console.error('Verbindungsfehler:', error);
-      setConnectionError('Keine Verbindung zum Server möglich');
-    });
-  
-    // Game Events
-    socket.on('game-created', (data) => {
-      console.log('Game created event:', data);
-      setGameId(data.gameId);
-      setGameData(data.game);
-      setGameState('lobby');
-      setPlayerRole('host');
-      sessionStorage.setItem('gameId', data.gameId);
-    });
-  
-    socket.on('joined-game', (data) => {
-      console.log('Joined game event:', data);
-      setGameId(data.gameId);
-      setPlayerRole(data.role);
-      if (data.gameRole) {
-        setGameRole(data.gameRole);
-      }
-    });
-  
-    socket.on('game-updated', (game) => {
-      console.log('Game updated:', game);
-  
-      if (gameData.challengerScore !== undefined && game.challengerScore > gameData.challengerScore) {
-        setAnimateScore(true);
-        setTimeout(() => setAnimateScore(false), 1000);
-      }
-  
-      if (gameData.challengerCoins !== undefined && game.challengerCoins !== gameData.challengerCoins) {
-        setAnimateCoins(true);
-        setTimeout(() => setAnimateCoins(false), 1000);
-      }
-  
-      setGameData(game);
-      setGameState(game.state);
-  
-      const myPlayer = game.players?.find(p => p.id === socket.id);
-      if (myPlayer && myPlayer.gameRole) {
-        setGameRole(myPlayer.gameRole);
-      }
-  
-      if (game.phase === 'answering' && game.challengerAnswered === false && game.moderatorAnswered === false) {
-        setMyAnswer('');
-        setMyAnswered(false);
-      }
-  
-      if (game.phase === 'result' && gameData.phase === 'decision') {
-        setShowDecisionAnimation(true);
-        setTimeout(() => setShowDecisionAnimation(false), 2000);
-      }
-  
-      if (game.state === 'finished') {
-        sessionStorage.removeItem('gameId');
-        sessionStorage.removeItem('playerName');
-      }
-    });
-  
-    socket.on('game-started', (game) => {
-      console.log('Game started:', game);
-      setGameData(game);
-      setGameState('playing');
-    });
-  
-    socket.on('game-paused', (game) => {
-      setGameData(game);
-      alert('Ein Spieler hat das Spiel verlassen. Spiel pausiert.');
-    });
-  
-    socket.on('player-disconnected', (data) => {
-      alert(`${data.playerName} hat das Spiel verlassen.`);
-    });
-  
-    socket.on('error', (data) => {
-      alert(data.message);
-    });
-  
-    return () => {
-      socket.disconnect();
-    };
-  }, []); // ← GANZ WICHTIG: leeres Dependency-Array!
-  
+// ============= IMPROVED SESSION HANDLING =============
 
-  // Spiel erstellen
-  const createGame = () => {
-    if (!playerName.trim()) return;
+// Erweiterte Session-Verwaltung
+class SessionManager {
+  constructor() {
+    this.sessions = new Map();
+    this.reconnectTokens = new Map();
+    this.cleanupInterval = setInterval(() => this.cleanup(), 5 * 60 * 1000); // 5 Minuten
+  }
+
+  createSession(socketId, gameId, playerName, role, isHost) {
+    const sessionId = crypto.randomUUID();
+    const reconnectToken = crypto.randomBytes(32).toString('hex');
     
-    // Speichere Spielername
-    sessionStorage.setItem('playerName', playerName);
-    
-    socket.emit('create-game', {
+    const session = {
+      id: sessionId,
+      socketId,
+      gameId,
       playerName,
-      questions: []
-    });
-  };
+      role,
+      isHost,
+      reconnectToken,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      connected: true
+    };
 
-  // Spiel beitreten
-  const joinGame = () => {
-    if (!joinGameId.trim() || !playerName.trim()) return;
+    this.sessions.set(sessionId, session);
+    this.reconnectTokens.set(reconnectToken, sessionId);
     
-    // Speichere Spieldaten
-    sessionStorage.setItem('gameId', joinGameId.toUpperCase());
-    sessionStorage.setItem('playerName', playerName);
+    return { sessionId, reconnectToken };
+  }
+
+  getSession(sessionId) {
+    return this.sessions.get(sessionId);
+  }
+
+  findSessionByReconnectToken(token) {
+    const sessionId = this.reconnectTokens.get(token);
+    return sessionId ? this.sessions.get(sessionId) : null;
+  }
+
+  findSessionBySocket(socketId) {
+    for (const session of this.sessions.values()) {
+      if (session.socketId === socketId) {
+        return session;
+      }
+    }
+    return null;
+  }
+
+  findSessionsByGame(gameId) {
+    return Array.from(this.sessions.values()).filter(s => s.gameId === gameId);
+  }
+
+  updateSession(sessionId, updates) {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      Object.assign(session, updates, { lastActivity: Date.now() });
+      return session;
+    }
+    return null;
+  }
+
+  disconnectSession(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.connected = false;
+      session.disconnectedAt = Date.now();
+    }
+    return session;
+  }
+
+  reconnectSession(sessionId, newSocketId) {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.socketId = newSocketId;
+      session.connected = true;
+      session.lastActivity = Date.now();
+      delete session.disconnectedAt;
+    }
+    return session;
+  }
+
+  deleteSession(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      this.sessions.delete(sessionId);
+      this.reconnectTokens.delete(session.reconnectToken);
+    }
+    return session;
+  }
+
+  cleanup() {
+    const now = Date.now();
+    const maxAge = 2 * 60 * 60 * 1000; // 2 Stunden
+    const maxDisconnectedAge = 30 * 60 * 1000; // 30 Minuten disconnected
+
+    for (const [sessionId, session] of this.sessions.entries()) {
+      const age = now - session.createdAt;
+      const disconnectedAge = session.disconnectedAt ? now - session.disconnectedAt : 0;
+
+      if (age > maxAge || disconnectedAge > maxDisconnectedAge) {
+        this.deleteSession(sessionId);
+        console.log('Session cleaned up:', sessionId);
+      }
+    }
+  }
+
+  destroy() {
+    clearInterval(this.cleanupInterval);
+    this.sessions.clear();
+    this.reconnectTokens.clear();
+  }
+}
+
+// ============= IMPROVED GAME MANAGER =============
+
+class GameManager {
+  constructor() {
+    this.games = new Map();
+    this.gamesByPlayer = new Map();
+    this.cleanupInterval = setInterval(() => this.cleanup(), 5 * 60 * 1000);
+  }
+
+  createGame(hostId, hostName) {
+    const gameId = this.generateGameId();
+    const initialCoins = this.getRandomCoins();
     
-    socket.emit('join-game', {
-      gameId: joinGameId.toUpperCase(),
-      playerName
-    });
-  };
+    const game = {
+      id: gameId,
+      hostId,
+      hostName,
+      players: [{
+        id: hostId,
+        name: hostName,
+        role: 'host',
+        isHost: true,
+        connected: true,
+        lastSeen: Date.now()
+      }],
+      questions: [],
+      currentQuestion: 0,
+      state: 'lobby', // lobby, setup, playing, paused, finished
+      challengerScore: 0,
+      moderatorScore: 0,
+      challengerCoins: initialCoins,
+      initialCoins: initialCoins,
+      challengerName: '',
+      moderatorName: '',
+      challengerId: null,
+      moderatorId: null,
+      phase: 'answering', // answering, decision, result
+      challengerAnswer: '',
+      moderatorAnswer: '',
+      challengerAnswered: false,
+      moderatorAnswered: false,
+      challengerCorrect: false,
+      decision: '',
+      roundResult: '',
+      showModeratorAnswer: false,
+      winner: '',
+      usedQuestions: [],
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      version: 1 // Für Synchronisation
+    };
 
-  // Spiel starten
-  const startGame = () => {
-    socket.emit('start-game', { gameId });
-  };
-
-  // Antwort abgeben
-  const submitAnswer = () => {
-    if (!myAnswer || myAnswered) return;
+    this.games.set(gameId, game);
+    this.gamesByPlayer.set(hostId, gameId);
     
-    setMyAnswered(true);
-    socket.emit('submit-answer', {
-      gameId,
-      answer: myAnswer
+    return game;
+  }
+
+  getGame(gameId) {
+    return this.games.get(gameId?.toUpperCase());
+  }
+
+  getGameByPlayer(playerId) {
+    const gameId = this.gamesByPlayer.get(playerId);
+    return gameId ? this.games.get(gameId) : null;
+  }
+
+  updateGame(gameId, updates) {
+    const game = this.games.get(gameId);
+    if (game) {
+      Object.assign(game, updates, { 
+        lastActivity: Date.now(),
+        version: game.version + 1
+      });
+      return game;
+    }
+    return null;
+  }
+
+  addPlayerToGame(gameId, playerId, playerName) {
+    const game = this.games.get(gameId);
+    if (!game || game.players.length >= 2) {
+      return null;
+    }
+
+    const player = {
+      id: playerId,
+      name: playerName,
+      role: 'player2',
+      isHost: false,
+      connected: true,
+      lastSeen: Date.now()
+    };
+
+    game.players.push(player);
+    this.gamesByPlayer.set(playerId, gameId);
+    
+    // Rollen zuweisen wenn 2 Spieler
+    if (game.players.length === 2) {
+      this.assignRoles(game);
+    }
+
+    game.lastActivity = Date.now();
+    game.version++;
+    
+    return game;
+  }
+
+  assignRoles(game) {
+    if (game.players.length !== 2) return;
+
+    // Rollen zufällig verteilen
+    if (Math.random() < 0.5) {
+      game.challengerName = game.players[0].name;
+      game.moderatorName = game.players[1].name;
+      game.challengerId = game.players[0].id;
+      game.moderatorId = game.players[1].id;
+      game.players[0].gameRole = 'challenger';
+      game.players[1].gameRole = 'moderator';
+    } else {
+      game.challengerName = game.players[1].name;
+      game.moderatorName = game.players[0].name;
+      game.challengerId = game.players[1].id;
+      game.moderatorId = game.players[0].id;
+      game.players[1].gameRole = 'challenger';
+      game.players[0].gameRole = 'moderator';
+    }
+    
+    game.state = 'setup';
+  }
+
+  removePlayerFromGame(gameId, playerId) {
+    const game = this.games.get(gameId);
+    if (!game) return null;
+
+    const playerIndex = game.players.findIndex(p => p.id === playerId);
+    if (playerIndex === -1) return null;
+
+    game.players.splice(playerIndex, 1);
+    this.gamesByPlayer.delete(playerId);
+    
+    // Wenn Host verlässt, Spiel beenden
+    if (game.hostId === playerId) {
+      this.deleteGame(gameId);
+      return null;
+    }
+
+    game.lastActivity = Date.now();
+    game.version++;
+    
+    return game;
+  }
+
+  deleteGame(gameId) {
+    const game = this.games.get(gameId);
+    if (game) {
+      // Alle Spieler aus gamesByPlayer entfernen
+      game.players.forEach(player => {
+        this.gamesByPlayer.delete(player.id);
+      });
+      
+      this.games.delete(gameId);
+      return true;
+    }
+    return false;
+  }
+
+  generateGameId() {
+    let gameId;
+    do {
+      gameId = Math.random().toString(36).substr(2, 6).toUpperCase();
+    } while (this.games.has(gameId));
+    return gameId;
+  }
+
+  getRandomCoins() {
+    return Math.floor(Math.random() * 3) + 1; // 1-3 Münzen
+  }
+
+  cleanup() {
+    const now = Date.now();
+    const timeout = 30 * 60 * 1000; // 30 Minuten
+    
+    for (const [gameId, game] of this.games.entries()) {
+      const allDisconnected = game.players.every(p => !p.connected);
+      
+      if (allDisconnected && (now - game.lastActivity > timeout)) {
+        this.deleteGame(gameId);
+        console.log('Cleaned up inactive game:', gameId);
+      }
+    }
+  }
+
+  getStats() {
+    return {
+      totalGames: this.games.size,
+      activeGames: Array.from(this.games.values()).filter(g => g.state === 'playing').length,
+      lobbyGames: Array.from(this.games.values()).filter(g => g.state === 'lobby').length,
+      finishedGames: Array.from(this.games.values()).filter(g => g.state === 'finished').length
+    };
+  }
+
+  destroy() {
+    clearInterval(this.cleanupInterval);
+    this.games.clear();
+    this.gamesByPlayer.clear();
+  }
+}
+
+// ============= QUESTION SERVICE (IMPROVED) =============
+
+class QuestionService {
+  constructor() {
+    this.groqApiKey = process.env.GROQ_API_KEY;
+    this.deeplApiKey = process.env.DEEPL_API_KEY;
+    
+    // Caches
+    this.questionCache = [];
+    this.translationCache = new Map();
+    this.usedQuestions = new Set();
+    this.sessionToken = null;
+    
+    // Rate limiting
+    this.groqRequestCount = 0;
+    this.groqResetTime = Date.now() + 60000; // 1 Minute
+    this.deeplRequestCount = 0;
+    this.deeplResetTime = Date.now() + 60000;
+    
+    // Statistiken
+    this.stats = {
+      totalGenerated: 0,
+      fromGroq: 0,
+      fromTriviaAPI: 0,
+      fromLocal: 0,
+      translations: 0,
+      cacheHits: 0,
+      errors: 0
+    };
+
+    this.initTriviaSession();
+  }
+
+  async initTriviaSession() {
+    try {
+      const response = await axios.get('https://opentdb.com/api_token.php?command=request');
+      this.sessionToken = response.data.token;
+      console.log('Trivia API Session initialisiert');
+    } catch (error) {
+      console.error('Trivia Session Fehler:', error);
+    }
+  }
+
+  async getQuestions(count = 10, gameId = null) {
+    console.log(`Generiere ${count} neue Fragen für Spiel ${gameId}`);
+    
+    let questions = [];
+    
+    // Prüfe Cache zuerst
+    if (this.questionCache.length > 0) {
+      const fromCache = this.questionCache.splice(0, Math.min(count, this.questionCache.length));
+      questions.push(...fromCache);
+      this.stats.cacheHits += fromCache.length;
+      console.log(`${fromCache.length} Fragen aus Cache verwendet`);
+    }
+    
+    const remaining = count - questions.length;
+    if (remaining <= 0) {
+      return this.deduplicateQuestions(questions, gameId);
+    }
+    
+    // Versuche Groq AI (mit Rate Limiting)
+    if (this.groqApiKey && this.canMakeGroqRequest()) {
+      try {
+        const groqQuestions = await this.generateWithGroq(Math.ceil(remaining * 0.7));
+        questions.push(...groqQuestions);
+        console.log(`${groqQuestions.length} Fragen von Groq generiert`);
+      } catch (error) {
+        console.error('Groq Fehler:', error);
+        this.stats.errors++;
+      }
+    }
+    
+    // Fülle mit Trivia API auf
+    const stillNeeded = count - questions.length;
+    if (stillNeeded > 0) {
+      try {
+        const triviaQuestions = await this.fetchFromTriviaAPI(stillNeeded);
+        questions.push(...triviaQuestions);
+        console.log(`${triviaQuestions.length} Fragen von Trivia API geholt`);
+      } catch (error) {
+        console.error('Trivia API Fehler:', error);
+        this.stats.errors++;
+      }
+    }
+    
+    // Fallback auf lokale Fragen
+    const finallyNeeded = count - questions.length;
+    if (finallyNeeded > 0) {
+      const localQuestions = this.getLocalQuestions(finallyNeeded);
+      questions.push(...localQuestions);
+      console.log(`${localQuestions.length} lokale Fragen verwendet`);
+    }
+    
+    // Fülle Cache mit zusätzlichen Fragen auf
+    if (this.questionCache.length < 20) {
+      this.prefillCache();
+    }
+    
+    return this.deduplicateQuestions(questions, gameId).slice(0, count);
+  }
+
+  canMakeGroqRequest() {
+    const now = Date.now();
+    if (now > this.groqResetTime) {
+      this.groqRequestCount = 0;
+      this.groqResetTime = now + 60000;
+    }
+    return this.groqRequestCount < 30; // 30 Anfragen pro Minute
+  }
+
+  canMakeDeeplRequest() {
+    const now = Date.now();
+    if (now > this.deeplResetTime) {
+      this.deeplRequestCount = 0;
+      this.deeplResetTime = now + 60000;
+    }
+    return this.deeplRequestCount < 10; // 10 Anfragen pro Minute
+  }
+
+  async prefillCache() {
+    // Asynchron Cache auffüllen
+    setTimeout(async () => {
+      try {
+        const questions = await this.generateWithGroq(10);
+        this.questionCache.push(...questions);
+        console.log(`${questions.length} Fragen in Cache vorgefüllt`);
+      } catch (error) {
+        console.error('Cache Prefill Fehler:', error);
+      }
+    }, 1000);
+  }
+
+  async generateWithGroq(count) {
+    if (!this.groqApiKey || !this.canMakeGroqRequest()) return [];
+    
+    this.groqRequestCount++;
+    
+    try {
+      const categories = ['Geografie', 'Geschichte', 'Wissenschaft', 'Kultur', 'Sport', 'Allgemeinwissen'];
+      const selectedCategory = categories[Math.floor(Math.random() * categories.length)];
+      
+      const prompt = `Generiere ${count} hochwertige deutsche Multiple-Choice Quizfragen für die Kategorie "${selectedCategory}".
+
+WICHTIGE ANFORDERUNGEN:
+1. Die Fragen müssen faktisch 100% korrekt sein (Stand 2024)
+2. Genau EINE richtige Antwort pro Frage
+3. Drei plausible aber definitiv falsche Alternativen
+4. Fragen sollen interessant und lehrreich sein
+5. Verschiedene Schwierigkeitsgrade
+6. Vermeide zu schwierige oder obskure Fragen
+
+Antworte NUR mit validem JSON in diesem Format:
+{
+  "questions": [
+    {
+      "question": "Die Frage hier",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correct": 0,
+      "category": "${selectedCategory}",
+      "difficulty": "mittel"
+    }
+  ]
+}`;
+
+      const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+        model: 'mixtral-8x7b-32768',
+        messages: [
+          {
+            role: 'system',
+            content: 'Du bist ein Experte für Quizfragen. Antworte immer nur mit validem JSON ohne zusätzlichen Text.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.8,
+        max_tokens: 2000
+      }, {
+        headers: {
+          'Authorization': `Bearer ${this.groqApiKey}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      });
+
+      const content = response.data.choices[0].message.content;
+      let parsed;
+      
+      try {
+        parsed = JSON.parse(content);
+      } catch (parseError) {
+        // Versuche JSON aus Antwort zu extrahieren
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          parsed = JSON.parse(jsonMatch[0]);
+        } else {
+          throw parseError;
+        }
+      }
+      
+      const questions = parsed.questions.map(q => ({
+        ...q,
+        source: 'groq',
+        correct: parseInt(q.correct),
+        id: crypto.randomUUID()
+      }));
+      
+      this.stats.fromGroq += questions.length;
+      this.stats.totalGenerated += questions.length;
+      return questions;
+      
+    } catch (error) {
+      console.error('Groq Generierung Fehler:', error.response?.data || error.message);
+      this.stats.errors++;
+      return [];
+    }
+  }
+
+  async fetchFromTriviaAPI(count) {
+    try {
+      const params = {
+        amount: Math.min(count, 10), // Max 10 pro Anfrage
+        type: 'multiple',
+        encode: 'base64'
+      };
+      
+      if (this.sessionToken) {
+        params.token = this.sessionToken;
+      }
+      
+      const response = await axios.get('https://opentdb.com/api.php', { 
+        params,
+        timeout: 15000
+      });
+      
+      if (response.data.response_code === 4) {
+        // Token exhausted, reset
+        await this.initTriviaSession();
+        return this.fetchFromTriviaAPI(count);
+      }
+      
+      if (response.data.response_code !== 0) {
+        throw new Error('Trivia API Error: ' + response.data.response_code);
+      }
+      
+      const questions = [];
+      
+      for (const q of response.data.results) {
+        try {
+          // Dekodiere Base64
+          const question = Buffer.from(q.question, 'base64').toString('utf-8');
+          const correctAnswer = Buffer.from(q.correct_answer, 'base64').toString('utf-8');
+          const incorrectAnswers = q.incorrect_answers.map(a => 
+            Buffer.from(a, 'base64').toString('utf-8')
+          );
+          
+          // Übersetze ins Deutsche
+          const translatedQ = await this.translateText(question);
+          const translatedCorrect = await this.translateText(correctAnswer);
+          const translatedIncorrect = await Promise.all(
+            incorrectAnswers.map(a => this.translateText(a))
+          );
+          
+          // Mische Antworten
+          const allOptions = [...translatedIncorrect, translatedCorrect];
+          const shuffled = this.shuffle(allOptions);
+          const correctIndex = shuffled.indexOf(translatedCorrect);
+          
+          questions.push({
+            question: translatedQ,
+            options: shuffled,
+            correct: correctIndex,
+            category: this.mapCategory(q.category),
+            difficulty: q.difficulty,
+            source: 'triviaAPI',
+            id: crypto.randomUUID()
+          });
+        } catch (error) {
+          console.error('Fehler bei Frage-Verarbeitung:', error);
+          continue;
+        }
+      }
+      
+      this.stats.fromTriviaAPI += questions.length;
+      this.stats.totalGenerated += questions.length;
+      return questions;
+      
+    } catch (error) {
+      console.error('Trivia API Fehler:', error);
+      this.stats.errors++;
+      return [];
+    }
+  }
+
+  async translateText(text) {
+    // Cache check
+    if (this.translationCache.has(text)) {
+      return this.translationCache.get(text);
+    }
+    
+    // Einfache Übersetzungen
+    const simpleTranslations = {
+      'True': 'Richtig',
+      'False': 'Falsch',
+      'Yes': 'Ja',
+      'No': 'Nein',
+      'North': 'Nord',
+      'South': 'Süd',
+      'East': 'Ost',
+      'West': 'West',
+      'All of the above': 'Alle genannten',
+      'None of the above': 'Keine der genannten'
+    };
+    
+    if (simpleTranslations[text]) {
+      this.translationCache.set(text, simpleTranslations[text]);
+      return simpleTranslations[text];
+    }
+    
+    // DeepL Übersetzung (mit Rate Limiting)
+    if (this.deeplApiKey && this.canMakeDeeplRequest()) {
+      try {
+        this.deeplRequestCount++;
+        
+        const response = await axios.post('https://api-free.deepl.com/v2/translate', {
+          text: [text],
+          target_lang: 'DE'
+        }, {
+          headers: {
+            'Authorization': `DeepL-Auth-Key ${this.deeplApiKey}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        });
+        
+        const translated = response.data.translations[0].text;
+        this.translationCache.set(text, translated);
+        this.stats.translations++;
+        return translated;
+        
+      } catch (error) {
+        console.error('DeepL Übersetzungsfehler:', error);
+      }
+    }
+    
+    // Fallback: Original zurückgeben
+    this.translationCache.set(text, text);
+    return text;
+  }
+
+  getLocalQuestions(count) {
+    const unused = questionDatabase.filter(q => {
+      const hash = this.hashQuestion(q.question);
+      return !this.usedQuestions.has(hash);
     });
-  };
-
-  // Entscheidung treffen
-  const makeDecision = (decision) => {
-    socket.emit('make-decision', {
-      gameId,
-      decision
+    
+    const shuffled = this.shuffle(unused);
+    const selected = shuffled.slice(0, count);
+    
+    selected.forEach(q => {
+      this.usedQuestions.add(this.hashQuestion(q.question));
     });
-  };
-
-  // Nächste Runde
-  const nextRound = () => {
-    socket.emit('next-round', { gameId });
-  };
-
-  // Render-Funktionen
-  const renderConnectionStatus = () => (
-    <div className={`fixed top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs transition-all ${
-      connected ? 'bg-green-500/20 backdrop-blur' : 'bg-red-500/20 backdrop-blur'
-    }`}>
-      {connected ? (
-        <>
-          <Wifi className="w-3 h-3 text-green-400" />
-          <span className="text-green-400">Online</span>
-        </>
-      ) : (
-        <>
-          <WifiOff className="w-3 h-3 text-red-400" />
-          <span className="text-red-400">Offline</span>
-        </>
-      )}
-    </div>
-  );
-
-  // Menu Screen
-  if (gameState === 'menu') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4">
-        {renderConnectionStatus()}
-        
-        <div className="max-w-md mx-auto pt-8">
-          <div className="text-center mb-8 animate-fade-in">
-            <div className="flex justify-center mb-4">
-              <div className="relative">
-                <Shield className="w-16 h-16 text-blue-400 animate-float" />
-                <Sparkles className="w-8 h-8 text-yellow-400 absolute -top-2 -right-2 animate-pulse" />
-              </div>
-            </div>
-            <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">Vertrauen oder Zweifeln</h1>
-            <p className="text-gray-300 text-sm">Das ultimative Vertrauensspiel</p>
-          </div>
-          
-          {connectionError && (
-            <div className="bg-red-500/20 backdrop-blur border border-red-500/50 rounded-xl p-4 mb-6 flex items-center gap-2 animate-shake">
-              <AlertCircle className="text-red-400 w-5 h-5 flex-shrink-0" />
-              <span className="text-red-400 text-sm">{connectionError}</span>
-            </div>
-          )}
-          
-          <div className="space-y-4">
-            {/* Spiel erstellen */}
-            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 hover:bg-white/15 transition-all">
-              <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <Users className="text-blue-400" />
-                Neues Spiel
-              </h2>
-              
-              <div className="space-y-4">
-                <input
-                  type="text"
-                  value={playerName}
-                  onChange={(e) => setPlayerName(e.target.value)}
-                  className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-blue-400 focus:outline-none transition-all"
-                  placeholder="Dein Name"
-                  maxLength={15}
-                />
-                
-                <button
-                  onClick={createGame}
-                  disabled={!playerName.trim() || !connected}
-                  className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-6 rounded-xl hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
-                >
-                  Spiel erstellen
-                </button>
-              </div>
-            </div>
-            
-            {/* Spiel beitreten */}
-            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 hover:bg-white/15 transition-all">
-              <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <Wifi className="text-green-400" />
-                Spiel beitreten
-              </h2>
-              
-              <div className="space-y-4">
-                <input
-                  type="text"
-                  value={playerName}
-                  onChange={(e) => setPlayerName(e.target.value)}
-                  className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-green-400 focus:outline-none transition-all"
-                  placeholder="Dein Name"
-                  maxLength={15}
-                />
-                
-                <input
-                  type="text"
-                  value={joinGameId}
-                  onChange={(e) => setJoinGameId(e.target.value.toUpperCase())}
-                  className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-green-400 focus:outline-none transition-all font-mono text-center text-lg"
-                  placeholder="SPIELCODE"
-                  maxLength={6}
-                />
-                
-                <button
-                  onClick={joinGame}
-                  disabled={!playerName.trim() || !joinGameId.trim() || !connected}
-                  className="w-full bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
-                >
-                  Beitreten
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    
+    this.stats.fromLocal += selected.length;
+    this.stats.totalGenerated += selected.length;
+    
+    return selected.map(q => ({
+      ...q,
+      source: 'local',
+      id: crypto.randomUUID()
+    }));
   }
 
-  // Lobby Screen
-  if (gameState === 'lobby') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4">
-        {renderConnectionStatus()}
-        
-        <div className="max-w-md mx-auto pt-8">
-          <div className="text-center mb-8 animate-fade-in">
-            <h1 className="text-3xl font-bold text-white mb-2">Warte auf Spieler...</h1>
-            <p className="text-gray-300 text-sm">Teile diesen Code:</p>
-          </div>
-          
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 mb-6 animate-scale-in">
-            <div className="text-center">
-              <div className="text-5xl font-mono font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 mb-4 animate-pulse">
-                {gameId}
-              </div>
-              <p className="text-gray-300 text-sm">Spielcode</p>
-            </div>
-          </div>
-          
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6">
-            <h3 className="text-lg font-bold text-white mb-4">Spieler im Raum:</h3>
-            <div className="space-y-2">
-              {gameData.players?.map((player, index) => (
-                <div key={index} className="flex items-center gap-3 bg-white/20 rounded-xl p-3 animate-slide-in" style={{animationDelay: `${index * 100}ms`}}>
-                  <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                  <span className="text-white font-medium flex-1">{player.name}</span>
-                  {player.role === 'host' && (
-                    <span className="text-xs bg-blue-500/30 text-blue-300 px-2 py-1 rounded-full">Host</span>
-                  )}
-                </div>
-              ))}
-              
-              {gameData.players?.length === 1 && (
-                <div className="flex items-center gap-3 bg-white/10 rounded-xl p-3 border-2 border-dashed border-white/30">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
-                  <span className="text-gray-400">Warte auf zweiten Spieler...</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+  deduplicateQuestions(questions, gameId) {
+    const unique = [];
+    const seen = new Set();
+    
+    for (const q of questions) {
+      const hash = this.hashQuestion(q.question);
+      
+      if (!seen.has(hash) && !this.usedQuestions.has(hash)) {
+        unique.push(q);
+        seen.add(hash);
+        this.usedQuestions.add(hash);
+      }
+    }
+    
+    return unique;
   }
 
-  // Setup Screen
-  if (gameState === 'setup') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4">
-        {renderConnectionStatus()}
-        
-        <div className="max-w-md mx-auto pt-8">
-          <div className="text-center mb-8 animate-fade-in">
-            <h1 className="text-3xl font-bold text-white mb-2">Rollen werden verteilt...</h1>
-            <p className="text-gray-300 text-sm">Das Schicksal entscheidet!</p>
-          </div>
-          
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 space-y-4 animate-scale-in">
-            <div className={`bg-gradient-to-r from-blue-500/20 to-blue-600/20 rounded-xl p-4 text-center transform transition-all ${
-              gameData.challengerName ? 'scale-100 opacity-100' : 'scale-95 opacity-50'
-            }`}>
-              <div className="flex justify-center mb-2">
-                <Zap className="w-8 h-8 text-blue-400 animate-pulse" />
-              </div>
-              <h3 className="text-lg font-bold text-white mb-1">Herausforderer</h3>
-              <p className="text-2xl font-bold text-blue-400">{gameData.challengerName || '...'}</p>
-              <p className="text-gray-300 text-sm mt-2">Beantwortet Fragen & trifft Entscheidungen</p>
-              <div className="mt-3 flex items-center justify-center gap-1">
-                <Coins className="w-4 h-4 text-yellow-400" />
-                <span className="text-yellow-400 font-bold">{gameData.initialCoins} Münzen zum Start</span>
-              </div>
-            </div>
-            
-            <div className={`bg-gradient-to-r from-purple-500/20 to-purple-600/20 rounded-xl p-4 text-center transform transition-all ${
-              gameData.moderatorName ? 'scale-100 opacity-100' : 'scale-95 opacity-50'
-            }`}>
-              <div className="flex justify-center mb-2">
-                <Shield className="w-8 h-8 text-purple-400 animate-pulse" />
-              </div>
-              <h3 className="text-lg font-bold text-white mb-1">Moderator</h3>
-              <p className="text-2xl font-bold text-purple-400">{gameData.moderatorName || '...'}</p>
-              <p className="text-gray-300 text-sm mt-2">Beantwortet Fragen & sammelt Vertrauen</p>
-            </div>
-            
-            <div className="text-center pt-4">
-              <p className="text-xs text-gray-400 mb-2">Debug: Role={playerRole}, GameRole={gameRole}</p>
-              {playerRole === 'host' ? (
-                <button
-                  onClick={startGame}
-                  className="bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-8 rounded-xl hover:from-green-600 hover:to-blue-700 transition-all transform hover:scale-105 active:scale-95"
-                >
-                  Spiel starten
-                </button>
-              ) : (
-                <p className="text-gray-300 animate-pulse">Warte auf den Spielleiter...</p>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+  mapCategory(apiCategory) {
+    const mapping = {
+      'Geography': 'Geografie',
+      'History': 'Geschichte',
+      'Science': 'Wissenschaft',
+      'Science & Nature': 'Wissenschaft',
+      'Sports': 'Sport',
+      'Entertainment': 'Kultur',
+      'Art': 'Kultur',
+      'General Knowledge': 'Allgemeinwissen',
+      'Mythology': 'Geschichte',
+      'Politics': 'Geschichte',
+      'Celebrities': 'Kultur',
+      'Animals': 'Wissenschaft'
+    };
+    
+    return mapping[apiCategory] || 'Allgemeinwissen';
   }
 
-  // Playing Screen
-  if (gameState === 'playing') {
-    const currentQ = gameData.questions?.[gameData.currentQuestion];
-    if (!currentQ) return <div className="text-white">Laden...</div>;
-
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4 pb-20">
-        {renderConnectionStatus()}
-        
-        <div className="max-w-2xl mx-auto">
-          {/* Header */}
-          <div className="text-center mb-4 pt-4">
-            <h1 className="text-2xl font-bold text-white">Vertrauen oder Zweifeln</h1>
-          </div>
-
-          {/* Spieler Status Cards */}
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            <div className={`bg-white/10 backdrop-blur-lg rounded-xl p-3 transform transition-all ${
-              gameRole === 'challenger' ? 'ring-2 ring-blue-400 scale-105' : ''
-            } ${animateScore && gameRole === 'challenger' ? 'animate-bounce' : ''}`}>
-              <div className="flex items-center gap-2 mb-1">
-                <Zap className="text-blue-400 w-4 h-4" />
-                <span className="text-white font-bold text-sm">{gameData.challengerName}</span>
-              </div>
-              <div className="text-blue-400 text-xl font-bold">{gameData.challengerScore}</div>
-              <div className={`flex items-center gap-1 mt-1 ${animateCoins ? 'animate-shake' : ''}`}>
-                <Coins className="text-yellow-400 w-3 h-3" />
-                <span className={`font-bold text-sm ${gameData.challengerCoins <= 1 ? 'text-red-400' : 'text-yellow-400'}`}>
-                  {gameData.challengerCoins} {gameData.challengerCoins === 1 ? 'Münze' : 'Münzen'}
-                </span>
-              </div>
-              {gameRole === 'challenger' && <div className="text-xs text-blue-300 mt-1">Das bist du!</div>}
-            </div>
-            
-            <div className={`bg-white/10 backdrop-blur-lg rounded-xl p-3 transform transition-all ${
-              gameRole === 'moderator' ? 'ring-2 ring-purple-400 scale-105' : ''
-            }`}>
-              <div className="flex items-center gap-2 mb-1">
-                <Shield className="text-purple-400 w-4 h-4" />
-                <span className="text-white font-bold text-sm">{gameData.moderatorName}</span>
-              </div>
-              <div className="text-purple-400 text-xl font-bold">{gameData.moderatorScore}</div>
-              <div className="text-gray-400 text-xs mt-1">Moderator</div>
-              {gameRole === 'moderator' && <div className="text-xs text-purple-300 mt-1">Das bist du!</div>}
-            </div>
-          </div>
-
-          {/* Progress Bar */}
-          <div className="bg-white/10 rounded-full h-2 mb-6 overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-blue-400 to-purple-400 transition-all duration-500" 
-                 style={{width: `${Math.max(gameData.challengerScore, gameData.moderatorScore) * 20}%`}}>
-            </div>
-          </div>
-
-          {/* Aktuelle Frage */}
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6">
-            <h2 className="text-xl font-bold text-white mb-4 text-center">{currentQ.question}</h2>
-            
-            {gameData.phase === 'answering' && (
-              <div>
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  {currentQ.options.map((option, index) => (
-                    <button
-                      key={index}
-                      onClick={() => setMyAnswer(index.toString())}
-                      disabled={myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered)}
-                      className={`p-3 rounded-xl border-2 transition-all transform hover:scale-105 active:scale-95 ${
-                        myAnswer === index.toString()
-                          ? 'border-blue-400 bg-blue-400/20 text-white'
-                          : 'border-white/30 bg-white/10 text-gray-300 hover:border-white/50 hover:bg-white/20'
-                      } ${(myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered)) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                    >
-                      <span className="font-bold text-sm">{String.fromCharCode(65 + index)}) {option}</span>
-                    </button>
-                  ))}
-                </div>
-                
-                <div className="text-center">
-                  <button
-                    onClick={submitAnswer}
-                    disabled={!myAnswer || myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered)}
-                    className="bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-8 rounded-xl hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
-                  >
-                    {(myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered)) ? 'Antwort abgegeben' : 'Antwort abgeben'}
-                  </button>
-                  
-                  {(gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered) && (
-                    <p className="text-gray-400 mt-3 text-sm animate-pulse">Warte auf die Antwort des anderen Spielers...</p>
-                  )}
-                </div>
-              </div>
-            )}
-            
-            {gameData.phase === 'decision' && (
-              <div className="text-center animate-fade-in">
-<div className="mb-4">
-  <div className="bg-white/20 rounded-xl p-4 mb-4">
-    <p className="text-sm text-gray-300 mb-2">Deine Antwort:</p>
-
-    {(() => {
-      const answerIndex = gameRole === 'challenger'
-        ? parseInt(gameData.challengerAnswer)
-        : parseInt(gameData.moderatorAnswer);
-
-      const isCorrect = gameRole === 'challenger'
-        ? gameData.challengerCorrect
-        : answerIndex === currentQ.correct;
-
-      return (
-        <>
-          <p className="text-lg font-bold">
-            {String.fromCharCode(65 + answerIndex)} – {currentQ.options[answerIndex]}
-          </p>
-
-          <div className="flex justify-center items-center gap-2 mt-2">
-            {isCorrect ? (
-              <>
-                <CheckCircle className="text-green-400 w-5 h-5" />
-                <span className="text-green-400 font-bold">Richtig! +1 Punkt</span>
-              </>
-            ) : (
-              <>
-                <XCircle className="text-red-400 w-5 h-5" />
-                <span className="text-red-400 font-bold">Falsch!</span>
-              </>
-            )}
-          </div>
-        </>
-      );
-    })()}
-  </div>
-</div>
-                
-                {gameRole === 'challenger' ? (
-                  <div className="animate-scale-in">
-                    <h3 className="text-lg font-bold text-white mb-3">Zeit für deine Entscheidung!</h3>
-                    <p className="text-gray-300 mb-6 text-sm">
-                      {gameData.moderatorName} hat auch geantwortet.<br/>
-                      Vertraust du oder zweifelst du?
-                    </p>
-                    <div className="flex gap-3 justify-center">
-                      <button
-                        onClick={() => makeDecision('trust')}
-                        className="bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2"
-                      >
-                        <Heart className="w-4 h-4" />
-                        Vertrauen
-                      </button>
-                      <button
-                        onClick={() => makeDecision('doubt')}
-                        disabled={gameData.challengerCoins <= 0}
-                        className="bg-gradient-to-r from-red-500 to-pink-600 text-white font-bold py-3 px-6 rounded-xl hover:from-red-600 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2"
-                      >
-                        <Shield className="w-4 h-4" />
-                        Zweifeln
-                        <span className="text-xs bg-white/20 px-2 py-0.5 rounded-full">-1 <Coins className="inline w-3 h-3" /></span>
-                      </button>
-                    </div>
-                    {gameData.challengerCoins <= 0 && (
-                      <p className="text-red-400 text-sm mt-3 animate-pulse">Keine Münzen mehr zum Zweifeln!</p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-gray-400 animate-pulse">
-                    <Shield className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                    <p>Warte auf die Entscheidung von {gameData.challengerName}...</p>
-                  </div>
-                )}
-                {/* Challenger sieht Antwort des Moderators nur bei Zweifel */}
-                {gameRole === 'challenger' && gameData.showModeratorAnswer && (
-                  <div className="mt-6 bg-white/10 rounded-xl p-4 text-center animate-fade-in">
-                    <p className="text-sm text-gray-300 mb-1">Antwort von {gameData.moderatorName}:</p>
-                    <p className="text-lg font-bold">
-                      {String.fromCharCode(65 + parseInt(gameData.moderatorAnswer))} - {currentQ.options[parseInt(gameData.moderatorAnswer)]}
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-            
-            {gameData.phase === 'result' && (
-              <div className="text-center animate-fade-in">
-                {showDecisionAnimation && (
-                  <div className="mb-4 animate-bounce">
-                    {gameData.decision === 'trust' ? (
-                      <Heart className="w-16 h-16 text-green-400 mx-auto" />
-                    ) : (
-                      <Shield className="w-16 h-16 text-red-400 mx-auto" />
-                    )}
-                  </div>
-                )}
-                
-                <h3 className="text-xl font-bold text-white mb-4">Rundenergebnis</h3>
-                
-                <div className="bg-white/20 rounded-xl p-4 mb-4 space-y-3">
-                  <div>
-                    <p className="text-sm text-gray-300">Herausforderer:</p>
-                    <p className="font-bold">
-                      {String.fromCharCode(65 + parseInt(gameData.challengerAnswer))} - {currentQ.options[parseInt(gameData.challengerAnswer)]}
-                      {gameData.challengerCorrect ? 
-                        <CheckCircle className="inline ml-2 text-green-400 w-4 h-4" /> : 
-                        <XCircle className="inline ml-2 text-red-400 w-4 h-4" />
-                      }
-                    </p>
-                  </div>
-                  
-                  {gameData.showModeratorAnswer && (
-                    <div className="animate-slide-in">
-                      <p className="text-sm text-gray-300">Moderator:</p>
-                      <p className="font-bold">
-                        {String.fromCharCode(65 + parseInt(gameData.moderatorAnswer))} - {currentQ.options[parseInt(gameData.moderatorAnswer)]}
-                        {parseInt(gameData.moderatorAnswer) === currentQ.correct ? 
-                          <CheckCircle className="inline ml-2 text-green-400 w-4 h-4" /> : 
-                          <XCircle className="inline ml-2 text-red-400 w-4 h-4" />
-                        }
-                      </p>
-                    </div>
-                  )}
-                  
-                  <div className="pt-3 border-t border-white/30">
-                    <p className="text-sm text-gray-300">Richtige Antwort:</p>
-                    <p className="text-lg text-green-400 font-bold">
-                      {String.fromCharCode(65 + currentQ.correct)} - {currentQ.options[currentQ.correct]}
-                    </p>
-                  </div>
-                </div>
-                
-                <div className={`rounded-xl p-4 mb-6 ${
-                  gameData.roundResult?.includes('erhält 1 Punkt') ? 'bg-blue-500/20' : 'bg-purple-500/20'
-                }`}>
-                  <p className="text-white font-medium">{gameData.roundResult}</p>
-                  {gameData.decision === 'doubt' && gameData.roundResult?.includes('verloren') && (
-                    <div className="mt-2 flex items-center justify-center gap-2 text-red-400">
-                      <TrendingDown className="w-4 h-4" />
-                      <span className="text-sm">Eine Münze verloren!</span>
-                    </div>
-                  )}
-                </div>
-                
-                <button
-                  onClick={nextRound}
-                  className="bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-8 rounded-xl hover:from-green-600 hover:to-blue-700 transition-all transform hover:scale-105 active:scale-95"
-                >
-                  Nächste Runde
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
+  hashQuestion(question) {
+    return crypto.createHash('md5').update(question.toLowerCase().replace(/[^a-z0-9äöüß]/g, '')).digest('hex');
   }
 
-  // Finished Screen
-  if (gameState === 'finished') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4">
-        {renderConnectionStatus()}
-        
-        <div className="max-w-md mx-auto pt-8">
-          <div className="text-center mb-8 animate-fade-in">
-            <Trophy className="text-yellow-400 w-20 h-20 mx-auto mb-4 animate-bounce" />
-            <h1 className="text-3xl font-bold text-white mb-2">Spiel beendet!</h1>
-          </div>
-          
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 text-center animate-scale-in">
-            <h2 className="text-2xl font-bold text-white mb-6">
-              {gameData.winner === 'Unentschieden' ? (
-                <span className="text-gray-400">Unentschieden!</span>
-              ) : (
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-400">
-                  {gameData.winner} gewinnt!
-                </span>
-              )}
-            </h2>
-            
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="bg-white/20 rounded-xl p-4">
-                <Zap className="w-6 h-6 text-blue-400 mx-auto mb-2" />
-                <h3 className="font-bold text-white">{gameData.challengerName}</h3>
-                <p className="text-2xl text-blue-400 font-bold">{gameData.challengerScore}</p>
-                <div className="flex items-center justify-center gap-1 mt-1">
-                  <Coins className="w-4 h-4 text-yellow-400" />
-                  <span className="text-sm text-gray-300">{gameData.challengerCoins} übrig</span>
-                </div>
-              </div>
-              
-              <div className="bg-white/20 rounded-xl p-4">
-                <Shield className="w-6 h-6 text-purple-400 mx-auto mb-2" />
-                <h3 className="font-bold text-white">{gameData.moderatorName}</h3>
-                <p className="text-2xl text-purple-400 font-bold">{gameData.moderatorScore}</p>
-                <p className="text-sm text-gray-300 mt-1">Moderator</p>
-              </div>
-            </div>
-            
-            {gameData.challengerCoins <= 0 && gameData.winner === gameData.moderatorName && (
-              <div className="bg-red-500/20 rounded-xl p-3 mb-4">
-                <p className="text-red-400 text-sm flex items-center justify-center gap-2">
-                  <Coins className="w-4 h-4" />
-                  Herausforderer hat alle Münzen verloren!
-                </p>
-              </div>
-            )}
-            
-            <button
-              onClick={() => window.location.reload()}
-              className="w-full bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 transition-all transform hover:scale-105 active:scale-95"
-            >
-              Neues Spiel
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+  shuffle(array) {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
   }
 
-  return <div className="text-white">Laden...</div>;
+  getStats() {
+    return {
+      ...this.stats,
+      cacheSize: this.questionCache.length,
+      translationCacheSize: this.translationCache.size,
+      usedQuestionsCount: this.usedQuestions.size,
+      groqRateLimit: {
+        requests: this.groqRequestCount,
+        resetTime: new Date(this.groqResetTime).toISOString()
+      },
+      deeplRateLimit: {
+        requests: this.deeplRequestCount,
+        resetTime: new Date(this.deeplResetTime).toISOString()
+      }
+    };
+  }
+
+  clearCache() {
+    this.questionCache = [];
+    this.usedQuestions.clear();
+    this.translationCache.clear();
+    console.log('Question cache geleert');
+  }
+}
+
+// Lokale Fragendatenbank als Fallback
+const questionDatabase = [
+  // Geografie
+  { question: "Welches ist das kleinste Land der Welt?", options: ["Monaco", "Vatikanstadt", "San Marino", "Liechtenstein"], correct: 1, category: "Geografie" },
+  { question: "Wie heißt die Hauptstadt von Island?", options: ["Oslo", "Reykjavik", "Helsinki", "Stockholm"], correct: 1, category: "Geografie" },
+  { question: "Welcher ist der längste Fluss Europas?", options: ["Donau", "Rhein", "Wolga", "Seine"], correct: 2, category: "Geografie" },
+  { question: "Wie viele Zeitzonen gibt es in Russland?", options: ["7", "9", "11", "13"], correct: 2, category: "Geografie" },
+  { question: "Welches Land hat die meisten Inseln?", options: ["Indonesien", "Schweden", "Kanada", "Japan"], correct: 1, category: "Geografie" },
+  { question: "Welcher Berg ist der höchste in Afrika?", options: ["Mount Kenya", "Kilimandscharo", "Atlas", "Drakensberg"], correct: 1, category: "Geografie" },
+  { question: "Welches Land grenzt an die meisten anderen Länder?", options: ["Russland", "China", "Brasilien", "Deutschland"], correct: 1, category: "Geografie" },
+  { question: "Wie heißt die Wüste im Süden Israels?", options: ["Sahara", "Gobi", "Negev", "Atacama"], correct: 2, category: "Geografie" },
+  
+  // Geschichte
+  { question: "In welchem Jahr wurde die UNO gegründet?", options: ["1943", "1945", "1947", "1949"], correct: 1, category: "Geschichte" },
+  { question: "Wer war der erste Mensch im Weltraum?", options: ["Neil Armstrong", "Buzz Aldrin", "Juri Gagarin", "Alan Shepard"], correct: 2, category: "Geschichte" },
+  { question: "Wie lange dauerte der Hundertjährige Krieg?", options: ["100 Jahre", "116 Jahre", "99 Jahre", "124 Jahre"], correct: 1, category: "Geschichte" },
+  { question: "Welches war das erste Land mit Frauenwahlrecht?", options: ["USA", "Neuseeland", "Schweiz", "England"], correct: 1, category: "Geschichte" },
+  { question: "In welchem Jahr endete der Erste Weltkrieg?", options: ["1916", "1917", "1918", "1919"], correct: 2, category: "Geschichte" },
+  { question: "Wer erfand das Telefon?", options: ["Thomas Edison", "Alexander Graham Bell", "Nikola Tesla", "Guglielmo Marconi"], correct: 1, category: "Geschichte" },
+  { question: "In welchem Jahr fiel die Berliner Mauer?", options: ["1987", "1988", "1989", "1990"], correct: 2, category: "Geschichte" },
+  { question: "Welches Schiff sank 1912 auf seiner Jungfernfahrt?", options: ["Lusitania", "Titanic", "Britannic", "Queen Mary"], correct: 1, category: "Geschichte" },
+  
+  // Wissenschaft
+  { question: "Wie viele Knochen hat ein erwachsener Mensch?", options: ["186", "206", "226", "246"], correct: 1, category: "Wissenschaft" },
+  { question: "Was ist die häufigste Blutgruppe?", options: ["A+", "B+", "O+", "AB+"], correct: 2, category: "Wissenschaft" },
+  { question: "Welches ist das leichteste Element?", options: ["Helium", "Wasserstoff", "Lithium", "Beryllium"], correct: 1, category: "Wissenschaft" },
+  { question: "Wie viel Prozent der Erde sind mit Wasser bedeckt?", options: ["61%", "71%", "81%", "91%"], correct: 1, category: "Wissenschaft" },
+  { question: "Was ist die Schallgeschwindigkeit?", options: ["343 m/s", "443 m/s", "543 m/s", "643 m/s"], correct: 0, category: "Wissenschaft" },
+  { question: "Welches Organ produziert Insulin?", options: ["Leber", "Niere", "Bauchspeicheldrüse", "Milz"], correct: 2, category: "Wissenschaft" },
+  { question: "Wie viele Planeten hat unser Sonnensystem?", options: ["7", "8", "9", "10"], correct: 1, category: "Wissenschaft" },
+  { question: "Was ist die chemische Formel für Wasser?", options: ["H2O", "CO2", "O2", "H2O2"], correct: 0, category: "Wissenschaft" },
+  
+  // Kultur & Unterhaltung
+  { question: "Wer komponierte 'Die Zauberflöte'?", options: ["Beethoven", "Bach", "Mozart", "Händel"], correct: 2, category: "Kultur" },
+  { question: "Wie viele Harry Potter Filme gibt es?", options: ["6", "7", "8", "9"], correct: 2, category: "Kultur" },
+  { question: "In welchem Jahr wurde Netflix gegründet?", options: ["1995", "1997", "1999", "2001"], correct: 1, category: "Kultur" },
+  { question: "Wer malte 'Die Sternennacht'?", options: ["Monet", "Van Gogh", "Picasso", "Dalí"], correct: 1, category: "Kultur" },
+  { question: "Wie viele Saiten hat eine klassische Gitarre?", options: ["4", "5", "6", "7"], correct: 2, category: "Kultur" },
+  { question: "Wer schrieb 'Romeo und Julia'?", options: ["Goethe", "Shakespeare", "Schiller", "Dante"], correct: 1, category: "Kultur" },
+  { question: "Wie viele Oscars gewann 'Titanic'?", options: ["9", "10", "11", "12"], correct: 2, category: "Kultur" },
+  { question: "Welche Band veröffentlichte 'Bohemian Rhapsody'?", options: ["The Beatles", "Queen", "Led Zeppelin", "Pink Floyd"], correct: 1, category: "Kultur" },
+  
+  // Sport
+  { question: "Wie viele Spieler sind in einer Volleyball-Mannschaft?", options: ["4", "5", "6", "7"], correct: 2, category: "Sport" },
+  { question: "In welchem Land wurden die Olympischen Spiele erfunden?", options: ["Italien", "Griechenland", "Frankreich", "England"], correct: 1, category: "Sport" },
+  { question: "Wie lang ist ein Marathon?", options: ["40,195 km", "41,195 km", "42,195 km", "43,195 km"], correct: 2, category: "Sport" },
+  { question: "Welche Sportart heißt auch 'Königin der Sportarten'?", options: ["Fußball", "Tennis", "Leichtathletik", "Schwimmen"], correct: 2, category: "Sport" },
+  { question: "Wie viele Punkte ist ein Touchdown wert?", options: ["5", "6", "7", "8"], correct: 1, category: "Sport" },
+  { question: "Wie oft findet die Fußball-WM statt?", options: ["Alle 2 Jahre", "Alle 3 Jahre", "Alle 4 Jahre", "Alle 5 Jahre"], correct: 2, category: "Sport" },
+  { question: "Wie viele Ringe hat das Olympische Symbol?", options: ["4", "5", "6", "7"], correct: 1, category: "Sport" },
+  { question: "Welches Land gewann die meisten Fußball-Weltmeisterschaften?", options: ["Deutschland", "Argentinien", "Italien", "Brasilien"], correct: 3, category: "Sport" },
+  
+  // Allgemeinwissen
+  { question: "Wie viele Zähne hat ein erwachsener Mensch normalerweise?", options: ["28", "30", "32", "34"], correct: 2, category: "Allgemeinwissen" },
+  { question: "Was ist die meistgesprochene Sprache der Welt?", options: ["Englisch", "Mandarin", "Spanisch", "Hindi"], correct: 1, category: "Allgemeinwissen" },
+  { question: "Wie viele Herzen hat ein Oktopus?", options: ["1", "2", "3", "4"], correct: 2, category: "Allgemeinwissen" },
+  { question: "Welches Tier schläft am wenigsten?", options: ["Giraffe", "Elefant", "Delfin", "Pferd"], correct: 0, category: "Allgemeinwissen" },
+  { question: "Was bedeutet 'www'?", options: ["World Wide Web", "World Web Wide", "Web World Wide", "Wide World Web"], correct: 0, category: "Allgemeinwissen" },
+  { question: "Wie viele Buchstaben hat das deutsche Alphabet?", options: ["24", "26", "28", "30"], correct: 2, category: "Allgemeinwissen" },
+  { question: "Welches ist das häufigste Element im Universum?", options: ["Sauerstoff", "Kohlenstoff", "Wasserstoff", "Helium"], correct: 2, category: "Allgemeinwissen" },
+  { question: "Wie viele Minuten hat eine Stunde?", options: ["50", "60", "70", "80"], correct: 1, category: "Allgemeinwissen" }
+];
+
+// Instanzen
+const sessionManager = new SessionManager();
+const gameManager = new GameManager();
+const questionService = new QuestionService();
+
+// Hilfsfunktionen
+const getRandomQuestions = async (count = 10, gameId = null) => {
+  try {
+    return await questionService.getQuestions(count, gameId);
+  } catch (error) {
+    console.error('Fehler bei Fragengenerierung:', error);
+    // Fallback auf lokale Fragen
+    const shuffled = [...questionDatabase].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, count);
+  }
 };
 
-export default QuizGame;
+// API Endpoints
+app.get('/api/stats', (req, res) => {
+  res.json({
+    games: gameManager.getStats(),
+    questions: questionService.getStats(),
+    sessions: {
+      active: sessionManager.sessions.size,
+      reconnectTokens: sessionManager.reconnectTokens.size
+    }
+  });
+});
+
+app.get('/api/question-stats', (req, res) => {
+  res.json(questionService.getStats());
+});
+
+app.post('/api/clear-question-cache', (req, res) => {
+  questionService.clearCache();
+  res.json({ success: true, message: 'Question cache cleared' });
+});
+
+// Debug-Endpunkt
+app.get('/debug/games', (req, res) => {
+  const gamesList = Array.from(gameManager.games.entries()).map(([id, game]) => ({
+    id,
+    players: game.players.map(p => ({ 
+      name: p.name, 
+      role: p.role, 
+      isHost: p.isHost,
+      connected: p.connected,
+      gameRole: p.gameRole 
+    })),
+    state: game.state,
+    hostId: game.hostId,
+    createdAt: new Date(game.createdAt).toISOString(),
+    lastActivity: new Date(game.lastActivity).toISOString(),
+    version: game.version
+  }));
+  res.json(gamesList);
+});
+
+app.get('/debug/sessions', (req, res) => {
+  const sessionsList = Array.from(sessionManager.sessions.values()).map(session => ({
+    id: session.id,
+    gameId: session.gameId,
+    playerName: session.playerName,
+    role: session.role,
+    isHost: session.isHost,
+    connected: session.connected,
+    createdAt: new Date(session.createdAt).toISOString(),
+    lastActivity: new Date(session.lastActivity).toISOString()
+  }));
+  res.json(sessionsList);
+});
+
+// ============= SOCKET.IO EVENTS (IMPROVED) =============
+
+// Erweiterte Fehlerbehandlung
+const handleSocketError = (socket, error, context) => {
+  console.error(`Socket error in ${context}:`, error);
+  socket.emit('error', { 
+    message: 'Ein Fehler ist aufgetreten', 
+    context,
+    timestamp: new Date().toISOString()
+  });
+};
+
+// Authentifizierung Middleware
+const authenticateSocket = (socket, next) => {
+  const token = socket.handshake.auth.token;
+  const reconnectToken = socket.handshake.auth.reconnectToken;
+  
+  if (reconnectToken) {
+    const session = sessionManager.findSessionByReconnectToken(reconnectToken);
+    if (session) {
+      socket.session = session;
+      sessionManager.reconnectSession(session.id, socket.id);
+      console.log('Socket reconnected with session:', session.id);
+    }
+  }
+  
+  next();
+};
+
+io.use(authenticateSocket);
+
+io.on('connection', (socket) => {
+  console.log('Neuer Spieler verbunden:', socket.id);
+  
+  // Heartbeat für Verbindungsüberwachung
+  const heartbeatInterval = setInterval(() => {
+    socket.emit('ping');
+  }, 30000);
+  
+  socket.on('pong', () => {
+    const session = sessionManager.findSessionBySocket(socket.id);
+    if (session) {
+      sessionManager.updateSession(session.id, { lastActivity: Date.now() });
+    }
+  });
+
+  // Spiel erstellen
+  socket.on('create-game', async (data) => {
+    try {
+      console.log('CREATE GAME:', data);
+      const game = gameManager.createGame(socket.id, data.playerName);
+      
+      // Session erstellen
+      const { sessionId, reconnectToken } = sessionManager.createSession(
+        socket.id, 
+        game.id, 
+        data.playerName, 
+        'host', 
+        true
+      );
+      
+      // Fragen laden
+      game.questions = await getRandomQuestions(30, game.id);
+      
+      socket.join(game.id);
+      socket.emit('game-created', { 
+        gameId: game.id, 
+        game,
+        sessionId,
+        reconnectToken
+      });
+      
+      console.log('Game created:', game.id, 'by', data.playerName);
+    } catch (error) {
+      handleSocketError(socket, error, 'create-game');
+    }
+  });
+
+  // Spiel beitreten
+  socket.on('join-game', async (data) => {
+    try {
+      console.log('JOIN GAME:', data);
+      const { gameId, playerName } = data;
+      const game = gameManager.getGame(gameId);
+
+      if (!game) {
+        console.log('Game not found:', gameId);
+        socket.emit('error', { message: 'Spiel nicht gefunden!' });
+        return;
+      }
+
+      // Überprüfe ob Spieler reconnect
+      const existingPlayer = game.players.find(p => p.name === playerName);
+      
+      if (existingPlayer) {
+        // Reconnect
+        console.log('Player reconnecting:', playerName);
+        existingPlayer.id = socket.id;
+        existingPlayer.connected = true;
+        existingPlayer.lastSeen = Date.now();
+        
+        // Session aktualisieren
+        const sessions = sessionManager.findSessionsByGame(gameId);
+        const session = sessions.find(s => s.playerName === playerName);
+        if (session) {
+          sessionManager.reconnectSession(session.id, socket.id);
+        }
+        
+        socket.join(gameId);
+        
+        // Update Host ID wenn nötig
+        if (existingPlayer.isHost) {
+          game.hostId = socket.id;
+        }
+        
+        // Update Spieler IDs für Challenger/Moderator
+        if (game.challengerName === playerName) {
+          game.challengerId = socket.id;
+        }
+        if (game.moderatorName === playerName) {
+          game.moderatorId = socket.id;
+        }
+        
+        gameManager.updateGame(gameId, {});
+        
+        socket.emit('joined-game', { 
+          gameId, 
+          role: existingPlayer.role,
+          isHost: existingPlayer.isHost,
+          gameRole: existingPlayer.gameRole,
+          reconnectToken: session?.reconnectToken
+        });
+        
+        io.to(gameId).emit('game-updated', game);
+        return;
+      }
+
+      if (game.players.length >= 2) {
+        console.log('Game full:', gameId);
+        socket.emit('error', { message: 'Spiel ist bereits voll!' });
+        return;
+      }
+
+      // Neuer Spieler
+      const updatedGame = gameManager.addPlayerToGame(gameId, socket.id, playerName);
+      if (!updatedGame) {
+        socket.emit('error', { message: 'Konnte Spiel nicht beitreten!' });
+        return;
+      }
+
+      // Session erstellen
+      const { sessionId, reconnectToken } = sessionManager.createSession(
+        socket.id, 
+        gameId, 
+        playerName, 
+        'player2', 
+        false
+      );
+
+      socket.join(gameId);
+
+      // Update an alle Spieler senden
+      io.to(gameId).emit('game-updated', updatedGame);
+      
+      // Dem beitretenden Spieler seine Rolle mitteilen
+      const joinedPlayer = updatedGame.players.find(p => p.id === socket.id);
+      socket.emit('joined-game', { 
+        gameId, 
+        role: joinedPlayer.role,
+        isHost: joinedPlayer.isHost,
+        gameRole: joinedPlayer.gameRole,
+        sessionId,
+        reconnectToken
+      });
+
+      console.log('Player joined:', playerName, 'to game:', gameId);
+    } catch (error) {
+      handleSocketError(socket, error, 'join-game');
+    }
+  });
+
+  // Spiel starten
+  socket.on('start-game', async (data) => {
+    try {
+      console.log('START GAME:', data);
+      const { gameId } = data;
+      const game = gameManager.getGame(gameId);
+
+      if (!game) {
+        console.log('Game not found for start:', gameId);
+        return;
+      }
+
+      const session = sessionManager.findSessionBySocket(socket.id);
+      if (!session || !session.isHost) {
+        console.log('Non-host tried to start game:', socket.id);
+        return;
+      }
+
+      // Zusätzliche Fragen laden falls nötig
+      if (game.questions.length < 10) {
+        const newQuestions = await getRandomQuestions(20, gameId);
+        game.questions.push(...newQuestions);
+      }
+
+      gameManager.updateGame(gameId, {
+        state: 'playing',
+        phase: 'answering',
+        currentQuestion: 0
+      });
+
+      console.log('Game started:', gameId);
+      io.to(gameId).emit('game-started', game);
+    } catch (error) {
+      handleSocketError(socket, error, 'start-game');
+    }
+  });
+
+  // Antwort abgeben
+  socket.on('submit-answer', (data) => {
+    try {
+      console.log('SUBMIT ANSWER:', data);
+      const { gameId, answer } = data;
+      const game = gameManager.getGame(gameId);
+      
+      if (!game) {
+        console.log('Game not found for answer:', gameId);
+        return;
+      }
+      
+      const player = game.players.find(p => p.id === socket.id);
+      if (!player) {
+        console.log('Player not found:', socket.id);
+        return;
+      }
+
+      console.log('Player role:', player.gameRole, 'Answer:', answer);
+
+      const updates = {};
+
+      if (player.gameRole === 'challenger' || (player.isHost && game.challengerId === socket.id)) {
+        updates.challengerAnswer = answer;
+        updates.challengerAnswered = true;
+        console.log('Challenger answered');
+      } else if (player.gameRole === 'moderator' || (player.isHost && game.moderatorId === socket.id)) {
+        updates.moderatorAnswer = answer;
+        updates.moderatorAnswered = true;
+        console.log('Moderator answered');
+      }
+
+      gameManager.updateGame(gameId, updates);
+
+      // Prüfen ob beide geantwortet haben
+      if (game.challengerAnswered && game.moderatorAnswered) {
+        const currentQ = game.questions[game.currentQuestion];
+        const challengerCorrect = parseInt(game.challengerAnswer) === currentQ.correct;
+        
+        gameManager.updateGame(gameId, {
+          challengerCorrect,
+          challengerScore: challengerCorrect ? game.challengerScore + 1 : game.challengerScore,
+          phase: 'decision'
+        });
+        
+        console.log('Both answered, moving to decision phase');
+      }
+
+      io.to(gameId).emit('game-updated', game);
+    } catch (error) {
+      handleSocketError(socket, error, 'submit-answer');
+    }
+  });
+
+  // Entscheidung treffen
+  socket.on('make-decision', (data) => {
+    try {
+      console.log('MAKE DECISION:', data);
+      const { gameId, decision } = data;
+      const game = gameManager.getGame(gameId);
+      
+      if (!game) return;
+      
+      const player = game.players.find(p => p.id === socket.id);
+      if (!player || (player.gameRole !== 'challenger' && game.challengerId !== socket.id)) {
+        console.log('Non-challenger tried to make decision');
+        return;
+      }
+
+      const currentQ = game.questions[game.currentQuestion];
+      const moderatorCorrect = parseInt(game.moderatorAnswer) === currentQ.correct;
+
+      let roundResult;
+      let updates = { decision, phase: 'result' };
+
+      if (decision === 'trust') {
+        updates.moderatorScore = game.moderatorScore + 1;
+        roundResult = `${game.challengerName} vertraut ${game.moderatorName}. ${game.moderatorName} erhält 1 Punkt.`;
+      } else {
+        updates.challengerCoins = game.challengerCoins - 1;
+        updates.showModeratorAnswer = true;
+        
+        if (moderatorCorrect) {
+          updates.moderatorScore = game.moderatorScore + 1;
+          roundResult = `${game.challengerName} zweifelt. ${game.moderatorName} hatte recht und erhält 1 Punkt. Münze verloren!`;
+        } else {
+          updates.challengerCoins = game.challengerCoins; // Korrektur: Münze bleibt
+          roundResult = `${game.challengerName} zweifelt. ${game.moderatorName} lag falsch. Münze bleibt erhalten.`;
+        }
+      }
+
+      updates.roundResult = roundResult;
+      gameManager.updateGame(gameId, updates);
+
+      console.log('Decision made:', decision, 'Result:', roundResult);
+      io.to(gameId).emit('game-updated', game);
+    } catch (error) {
+      handleSocketError(socket, error, 'make-decision');
+    }
+  });
+
+  // Nächste Runde
+  socket.on('next-round', async (data) => {
+    try {
+      console.log('NEXT ROUND:', data);
+      const { gameId } = data;
+      const game = gameManager.getGame(gameId);
+
+      if (!game) return;
+
+      // Gewinnbedingungen prüfen
+      let updates = {};
+      
+      if (game.challengerScore >= 5) {
+        updates.winner = game.challengerName;
+        updates.state = 'finished';
+      } else if (game.moderatorScore >= 5) {
+        updates.winner = game.moderatorName;
+        updates.state = 'finished';
+      } else if (game.challengerCoins <= 0) {
+        updates.winner = game.moderatorName;
+        updates.state = 'finished';
+      } else {
+        // Nächste Frage
+        updates.currentQuestion = game.currentQuestion + 1;
+        
+        // Falls wir mehr Fragen brauchen, füge neue hinzu
+        if (game.currentQuestion >= game.questions.length - 5) {
+          const newQuestions = await getRandomQuestions(10, gameId);
+          game.questions.push(...newQuestions);
+          console.log(`${newQuestions.length} neue Fragen zum Spiel ${gameId} hinzugefügt`);
+        }
+        
+        updates.phase = 'answering';
+        updates.challengerAnswer = '';
+        updates.moderatorAnswer = '';
+        updates.challengerAnswered = false;
+        updates.moderatorAnswered = false;
+        updates.challengerCorrect = false;
+        updates.decision = '';
+        updates.roundResult = '';
+        updates.showModeratorAnswer = false;
+      }
+
+      gameManager.updateGame(gameId, updates);
+
+      console.log('Next round - Question:', game.currentQuestion, 'State:', game.state);
+      io.to(gameId).emit('game-updated', game);
+    } catch (error) {
+      handleSocketError(socket, error, 'next-round');
+    }
+  });
+
+  // Spieler disconnect
+  socket.on('disconnect', () => {
+    console.log('Spieler getrennt:', socket.id);
+    clearInterval(heartbeatInterval);
+    
+    try {
+      const session = sessionManager.findSessionBySocket(socket.id);
+      if (session) {
+        sessionManager.disconnectSession(session.id);
+        
+        const game = gameManager.getGame(session.gameId);
+        if (game) {
+          const disconnectedPlayer = game.players.find(p => p.id === socket.id);
+          
+          if (disconnectedPlayer) {
+            disconnectedPlayer.connected = false;
+            disconnectedPlayer.lastSeen = Date.now();
+            
+            gameManager.updateGame(session.gameId, {});
+            
+            // Benachrichtige andere Spieler nur wenn das Spiel läuft
+            if (game.state === 'playing') {
+              socket.to(session.gameId).emit('player-disconnected', {
+                playerName: disconnectedPlayer.name
+              });
+              
+              // Pausiere das Spiel
+              gameManager.updateGame(session.gameId, { state: 'paused' });
+              io.to(session.gameId).emit('game-paused', game);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error handling disconnect:', error);
+    }
+  });
+
+  // Reconnect handling
+  socket.on('reconnect-attempt', (data) => {
+    try {
+      const { reconnectToken } = data;
+      const session = sessionManager.findSessionByReconnectToken(reconnectToken);
+      
+      if (session) {
+        sessionManager.reconnectSession(session.id, socket.id);
+        const game = gameManager.getGame(session.gameId);
+        
+        if (game) {
+          const player = game.players.find(p => p.name === session.playerName);
+          if (player) {
+            player.id = socket.id;
+            player.connected = true;
+            player.lastSeen = Date.now();
+            
+            socket.join(session.gameId);
+            
+            socket.emit('reconnect-success', {
+              gameId: session.gameId,
+              role: session.role,
+              isHost: session.isHost,
+              gameRole: player.gameRole
+            });
+            
+            // Resume game if it was paused
+            if (game.state === 'paused') {
+              gameManager.updateGame(session.gameId, { state: 'playing' });
+              io.to(session.gameId).emit('game-resumed', game);
+            }
+            
+            io.to(session.gameId).emit('game-updated', game);
+          }
+        }
+      } else {
+        socket.emit('reconnect-failed', { message: 'Session nicht gefunden' });
+      }
+    } catch (error) {
+      handleSocketError(socket, error, 'reconnect-attempt');
+    }
+  });
+});
+
+// Cleanup alte Spiele und Sessions
+setInterval(() => {
+  gameManager.cleanup();
+  sessionManager.cleanup();
+}, 5 * 60 * 1000);
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  sessionManager.destroy();
+  gameManager.destroy();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  sessionManager.destroy();
+  gameManager.destroy();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+// Server starten
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server läuft auf Port ${PORT}`);
+  console.log(`Groq API: ${questionService.groqApiKey ? 'Aktiviert' : 'Nicht konfiguriert'}`);
+  console.log(`DeepL API: ${questionService.deeplApiKey ? 'Aktiviert' : 'Nicht konfiguriert'}`);
+});
+
+// Keep-Alive für Render
+setInterval(() => {
+  console.log('Keep alive ping:', new Date().toISOString());
+}, 14 * 60 * 1000);
