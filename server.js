@@ -1444,13 +1444,7 @@ socket.on('next-round', async (data) => {
       const session = sessionManager.findSessionBySocket(socket.id);
       if (session) {
         const game = gameManager.getGame(session.gameId);
-        
-        // Wenn Spiel bereits beendet, Session sofort löschen
-        if (!game || game.state === 'finished') {
-          sessionManager.deleteSession(session.id);
-          return;
-        }
-        
+                
         // Ansonsten normale Disconnect-Logik
         sessionManager.disconnectSession(session.id);
         
