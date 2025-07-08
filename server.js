@@ -924,40 +924,56 @@ io.on('connection', (socket) => {
   });
 
   // Spiel erstellen
-  socket.on('create-game', async (data) => {
-    try {
+socket.on('create-game', async (data) => {
+  try {
       console.log('CREATE GAME:', data);
+      const gameSettings = data.settings || {};
+
+      // Fordere zuerst die Fragen an, BEVOR das Spiel final erstellt wird.
+      const questions = await questionService.getQuestions(30, null, gameSettings);
+
+      // PRÜFUNG: Wenn eine spezielle Kategorie gewünscht war, aber keine Fragen dafür gefunden wurden.
+      // Wir prüfen, ob die erste Frage eine andere Kategorie hat als die gewünschte.
+      if (gameSettings.category && questions.length > 0 && questions[0].category.toLowerCase() !== gameSettings.category.toLowerCase()) {
+          
+          // Sende eine spezifische Fehlermeldung an den Client.
+          socket.emit('error', { 
+              message: `Leider konnten keine Fragen zur Kategorie "${gameSettings.category}" gefunden werden. Bitte versuche es mit einer allgemeineren Kategorie oder lasse das Feld leer.` 
+          });
+          console.log(`Failed to create game with category: ${gameSettings.category}. No matching questions found.`);
+          return; // Breche die Spielerstellung ab.
+      }
+
+      // Wenn alles gut ging, fahre mit der Spielerstellung fort.
       const game = gameManager.createGame(
-        socket.id, 
-        data.playerName,
-        data.settings || {}
+          socket.id,
+          data.playerName,
+          gameSettings
       );
-      
-      // Session erstellen
+
+      game.questions = questions; // Weise die bereits geladenen Fragen zu.
+
       const { sessionId, reconnectToken } = sessionManager.createSession(
-        socket.id, 
-        game.id, 
-        data.playerName, 
-        'host', 
-        true
+          socket.id,
+          game.id,
+          data.playerName,
+          'host',
+          true
       );
-      
-      // Fragen mit Settings laden
-      game.questions = await questionService.getQuestions(30, game.id, game.settings);
-      
+
       socket.join(game.id);
-      socket.emit('game-created', { 
-        gameId: game.id, 
-        game,
-        sessionId,
-        reconnectToken
+      socket.emit('game-created', {
+          gameId: game.id,
+          game,
+          sessionId,
+          reconnectToken
       });
-      
+
       console.log('Game created:', game.id, 'by', data.playerName, 'with settings:', game.settings);
-    } catch (error) {
+  } catch (error) {
       handleSocketError(socket, error, 'create-game');
-    }
-  });
+  }
+});
 
   // Spiel beitreten
   socket.on('join-game', async (data) => {
@@ -1289,73 +1305,71 @@ socket.on('cancel-skip', (data) => {
 });
 
   // Nächste Runde
-  socket.on('next-round', async (data) => {
-    try {
+// Durch diesen kompletten Block ersetzen
+socket.on('next-round', async (data) => {
+  try {
       console.log('NEXT ROUND:', data);
       const { gameId } = data;
       const game = gameManager.getGame(gameId);
-      updates.skipRequests = [];
-      updates.skipRequestedBy = null;
-      
+
       if (!game) return;
 
-      // Gewinnbedingungen prüfen
       let updates = {};
-      
-      if (game.challengerScore >= 5) {
-        updates.winner = game.challengerName;
-        updates.state = 'finished';
-      } else if (game.moderatorScore >= 5) {
-        updates.winner = game.moderatorName;
-        updates.state = 'finished';
-      } else if (game.challengerCoins <= 0) {
-        updates.winner = game.moderatorName;
-        updates.state = 'finished';
-      }
-      
-      // Wenn Spiel beendet, lösche alle Sessions
-      if (updates.state === 'finished') {
-        // Lösche alle Sessions für dieses Spiel
-        const sessions = sessionManager.findSessionsByGame(gameId);
-        sessions.forEach(session => {
-          sessionManager.deleteSession(session.id);
-        });
-        
-        // Optional: Lösche das Spiel nach kurzer Zeit
-        setTimeout(() => {
-          gameManager.deleteGame(gameId);
-        }, 5000);
+
+      // Prüfen, ob das Spiel beendet ist
+      if (game.challengerScore >= 5 || game.moderatorScore >= 5 || game.challengerCoins <= 0) {
+          if (game.challengerScore >= 5) {
+              updates.winner = game.challengerName;
+          } else {
+              updates.winner = game.moderatorName;
+          }
+          updates.state = 'finished';
+
+          // Sessions für das beendete Spiel aufräumen
+          const sessions = sessionManager.findSessionsByGame(gameId);
+          sessions.forEach(session => {
+              sessionManager.deleteSession(session.id);
+          });
+
+          // Das Spielobjekt nach einer kurzen Verzögerung löschen
+          setTimeout(() => {
+              gameManager.deleteGame(gameId);
+          }, 5000);
+
       } else {
-        // Nächste Frage
-        updates.currentQuestion = game.currentQuestion + 1;
-        
-        // Falls wir mehr Fragen brauchen, füge neue hinzu
-// Falls wir mehr Fragen brauchen, füge neue hinzu
-if (game.currentQuestion >= game.questions.length - 5) {
-  const newQuestions = await questionService.getQuestions(10, gameId, game.settings);
-  game.questions.push(...newQuestions);
-  console.log(`${newQuestions.length} neue Fragen zum Spiel ${gameId} hinzugefügt`);
-}
-        
-        updates.phase = 'answering';
-        updates.challengerAnswer = '';
-        updates.moderatorAnswer = '';
-        updates.challengerAnswered = false;
-        updates.moderatorAnswered = false;
-        updates.challengerCorrect = false;
-        updates.decision = '';
-        updates.roundResult = '';
-        updates.showModeratorAnswer = false;
+          // Nächste Runde vorbereiten
+          updates.currentQuestion = game.currentQuestion + 1;
+
+          // Bei Bedarf neue Fragen nachladen
+          if (game.currentQuestion >= game.questions.length - 5) {
+              const newQuestions = await questionService.getQuestions(10, gameId, game.settings);
+              game.questions.push(...newQuestions);
+              console.log(`${newQuestions.length} neue Fragen zum Spiel ${gameId} hinzugefügt`);
+          }
+
+          // Status für die neue Runde zurücksetzen
+          updates.phase = 'answering';
+          updates.challengerAnswer = '';
+          updates.moderatorAnswer = '';
+          updates.challengerAnswered = false;
+          updates.moderatorAnswered = false;
+          updates.challengerCorrect = false;
+          updates.decision = '';
+          updates.roundResult = '';
+          updates.showModeratorAnswer = false;
+          updates.skipRequests = []; // Korrekte Position
+          updates.skipRequestedBy = null; // Korrekte Position
       }
 
+      // Spielzustand aktualisieren und an alle Clients senden
       gameManager.updateGame(gameId, updates);
-
       console.log('Next round - Question:', game.currentQuestion, 'State:', game.state);
       io.to(gameId).emit('game-updated', game);
-    } catch (error) {
+
+  } catch (error) {
       handleSocketError(socket, error, 'next-round');
-    }
-  });
+  }
+});
 
   // Spieler disconnect
   socket.on('disconnect', () => {
