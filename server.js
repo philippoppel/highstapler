@@ -558,7 +558,7 @@ Respond ONLY with a valid JSON object in this exact format:
 }`;
 
       const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-          model: 'mixtral-8x7b-32768',
+          model: 'llama3-8b-8192',
           messages: [{
               role: 'system',
               content: 'You are an expert quiz master. You always respond with valid JSON only, following all instructions precisely.'
