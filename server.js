@@ -437,31 +437,44 @@ async getQuestions(count = 10, gameId = null, settings = {}) {
   let questions = [];
   
   // --- NEUE, VERBESSERTE CACHE-LOGIK ---
-  if (this.questionCache.length > 0) {
-      let fromCache = [];
-      
-      if (category) {
-          // 1. Finde alle Fragen, die zur angeforderten Kategorie passen
-          const matchingQuestions = this.questionCache.filter(q => q.category && q.category.toLowerCase() === category.toLowerCase());
-          
-          // 2. Nimm so viele wie benötigt, aber maximal so viele wie vorhanden
-          fromCache = matchingQuestions.slice(0, count);
-          
-          if (fromCache.length > 0) {
-              console.log(`${fromCache.length} passende Fragen für Kategorie "${category}" aus dem Cache gefunden.`);
-              // 3. Entferne die genommenen Fragen aus dem Haupt-Cache anhand ihrer eindeutigen ID
-              const usedIds = new Set(fromCache.map(q => q.id));
-              this.questionCache = this.questionCache.filter(q => !usedIds.has(q.id));
-          }
-      } else {
-          // Alte Logik, wenn keine spezifische Kategorie gebraucht wird (schneller Zugriff)
-          fromCache = this.questionCache.splice(0, count);
-          console.log(`${fromCache.length} generische Fragen aus dem Cache genommen.`);
-      }
-      
-      questions.push(...fromCache);
-      this.stats.cacheHits += fromCache.length;
+// --- CACHE MIT CATEGORY **UND** DIFFICULTY ---
+if (this.questionCache.length > 0) {
+  let fromCache = [];
+
+  if (category) {
+    // Kategorie *und* Schwierigkeit müssen passen
+    const matchingQuestions = this.questionCache.filter(
+      q =>
+        q.category &&
+        q.category.toLowerCase() === category.toLowerCase() &&
+        q.difficulty &&
+        q.difficulty.toLowerCase() === difficulty.toLowerCase()
+    );
+
+    fromCache = matchingQuestions.slice(0, count);
+
+    // entnommene Fragen aus dem Cache entfernen
+    const usedIds = new Set(fromCache.map(q => q.id));
+    this.questionCache = this.questionCache.filter(q => !usedIds.has(q.id));
+
+  } else {
+    // ohne Kategorie → nur nach Difficulty filtern
+    const matchingQuestions = this.questionCache.filter(
+      q =>
+        q.difficulty &&
+        q.difficulty.toLowerCase() === difficulty.toLowerCase()
+    );
+
+    fromCache = matchingQuestions.slice(0, count);
+
+    const usedIds = new Set(fromCache.map(q => q.id));
+    this.questionCache = this.questionCache.filter(q => !usedIds.has(q.id));
   }
+
+  questions.push(...fromCache);
+  this.stats.cacheHits += fromCache.length;
+}
+
 
   const remaining = count - questions.length;
 
@@ -486,7 +499,7 @@ async getQuestions(count = 10, gameId = null, settings = {}) {
       if (stillNeeded > 0) {
           try {
               // Die Trivia API unterstützt keine benutzerdefinierten Kategorien, dient also als allgemeiner Fallback
-              const triviaQuestions = await this.fetchFromTriviaAPI(stillNeeded);
+              const triviaQuestions = await this.fetchFromTriviaAPI(stillNeeded, difficulty);
               questions.push(...triviaQuestions);
               console.log(`${triviaQuestions.length} Fragen von Trivia API geholt`);
           } catch (error) {
@@ -641,74 +654,90 @@ Respond ONLY with a valid JSON object in this exact format:
   }
 }
 
-  async fetchFromTriviaAPI(count) {
-    try {
-      const params = {
-        amount: Math.min(count, 10), // Max 10 pro Anfrage
-        type: 'multiple',
-        encode: 'base64'
-      };
-      
-      if (this.sessionToken) {
-        params.token = this.sessionToken;
-      }
-      
-      const response = await axios.get('https://opentdb.com/api.php', { 
-        params,
-        timeout: 15000
-      });
-      
-      if (response.data.response_code === 4) {
-        // Token exhausted, reset
-        await this.initTriviaSession();
-        return this.fetchFromTriviaAPI(count);
-      }
-      
-      if (response.data.response_code !== 0) {
-        throw new Error('Trivia API Error: ' + response.data.response_code);
-      }
-      
-      const questions = [];
-      
-      for (const q of response.data.results) {
-        try {
-          // Dekodiere Base64
-          const question = Buffer.from(q.question, 'base64').toString('utf-8');
-          const correctAnswer = Buffer.from(q.correct_answer, 'base64').toString('utf-8');
-          const incorrectAnswers = q.incorrect_answers.map(a => 
-            Buffer.from(a, 'base64').toString('utf-8')
-          );
-          
-          // Mische Antworten
-          const allOptions = [...incorrectAnswers, correctAnswer];
-          const shuffled = this.shuffle(allOptions);
-          const correctIndex = shuffled.indexOf(correctAnswer);
-          
-          questions.push({
-            question: question,
-            options: shuffled,
-            correct: correctIndex,
-            category: this.mapCategory(q.category),
-            difficulty: q.difficulty,
-            source: 'triviaAPI',
-            id: crypto.randomUUID()
-          });
-        } catch (error) {
-          console.error('Error processing question:', error);
-          continue;
-        }
-      }
-      
-      this.stats.fromTriviaAPI += questions.length;
-      this.stats.totalGenerated += questions.length;
-      return questions;
-      
-    } catch (error) {
-      console.error('Trivia API Fehler:', error);
-      this.stats.errors++;
-      return [];
+// ============== KOPIEREN SIE AB HIER ================
+
+async fetchFromTriviaAPI(count, difficulty = 'medium') { // <--- HIER WURDE difficulty HINZUGEFÜGT
+  try {
+    const params = {
+      amount: Math.min(count, 10), // Max 10 pro Anfrage
+      type: 'multiple',
+      encode: 'base64',
+      difficulty: difficulty // <--- DIESE ZEILE IST NEU
+    };
+    
+    if (this.sessionToken) {
+      params.token = this.sessionToken;
     }
+    
+    const response = await axios.get('https://opentdb.com/api.php', { 
+      params,
+      timeout: 15000
+    });
+    
+    if (response.data.response_code === 4) {
+      // Token exhausted, reset
+      await this.initTriviaSession();
+      return this.fetchFromTriviaAPI(count, difficulty); // <--- HIER WURDE difficulty HINZUGEFÜGT
+    }
+    
+    if (response.data.response_code !== 0) {
+      // Wenn für eine Schwierigkeit keine Fragen da sind, versuche es ohne
+      if (response.data.response_code === 1) {
+          console.log(`Trivia API hat keine Fragen für Schwierigkeit "${difficulty}". Versuche es ohne Filter.`);
+          delete params.difficulty;
+          const fallbackResponse = await axios.get('https://opentdb.com/api.php', { params, timeout: 15000 });
+          if (fallbackResponse.data.response_code !== 0) {
+               throw new Error('Trivia API Error: ' + fallbackResponse.data.response_code);
+          }
+          response.data = fallbackResponse.data;
+      } else {
+          throw new Error('Trivia API Error: ' + response.data.response_code);
+      }
+    }
+    
+    const questions = [];
+    
+    for (const q of response.data.results) {
+      try {
+        // Dekodiere Base64
+        const question = Buffer.from(q.question, 'base64').toString('utf-8');
+        const correctAnswer = Buffer.from(q.correct_answer, 'base64').toString('utf-8');
+        const incorrectAnswers = q.incorrect_answers.map(a => 
+          Buffer.from(a, 'base64').toString('utf-8')
+        );
+        
+        // Mische Antworten
+        const allOptions = [...incorrectAnswers, correctAnswer];
+        const shuffled = this.shuffle(allOptions);
+        const correctIndex = shuffled.indexOf(correctAnswer);
+        
+        questions.push({
+          question: question,
+          options: shuffled,
+          correct: correctIndex,
+          category: this.mapCategory(Buffer.from(q.category, 'base64').toString('utf-8')), // Kategorie auch dekodieren
+          difficulty: q.difficulty,
+          source: 'triviaAPI',
+          id: crypto.randomUUID()
+        });
+      } catch (error) {
+        console.error('Error processing question:', error);
+        continue;
+      }
+    }
+    
+    this.stats.fromTriviaAPI += questions.length;
+    this.stats.totalGenerated += questions.length;
+    return questions;
+    
+  } catch (error) {
+    console.error('Trivia API Fehler:', error);
+    this.stats.errors++;
+    return [];
   }
+}
+
+// ============== KOPIEREN SIE BIS HIER ================
 
   getLocalQuestions(count) {
     const unused = questionDatabase.filter(q => {
