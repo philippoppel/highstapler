@@ -1373,9 +1373,15 @@ socket.on('next-round', async (data) => {
       if (!game) return;
 
       let updates = {};
-
-      // Prüfen, ob das Spiel beendet ist
-      if (game.challengerScore >= 5 || game.moderatorScore >= 5 || game.challengerCoins <= 0) {
+      const gameFinished =
+      game.challengerScore >= 5 ||
+      game.moderatorScore  >= 5 ||
+      game.challengerCoins <= 0;
+    
+    if (gameFinished) {
+      updates.state   = 'finished';
+      updates.winner  = (game.challengerScore >= 5) ? game.challengerName : game.moderatorName;
+      updates.endTime = Date.now();  
           if (game.challengerScore >= 5) {
               updates.winner = game.challengerName;
           } else {
