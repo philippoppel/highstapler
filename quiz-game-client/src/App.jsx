@@ -1449,3 +1449,5 @@ server.listen(PORT, '0.0.0.0', () => {
 setInterval(() => {
   console.log('Keep alive ping:', new Date().toISOString());
 }, 14 * 60 * 1000);
+
+export default QuizGame;

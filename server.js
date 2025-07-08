@@ -40,11 +40,13 @@ app.use(express.json());
 
 // FIX: Korrigierte Route
 app.get('/', (req, res) => {
-  res.json({ 
-    status: 'Server läuft!', 
+  res.json({
+    status: 'Server läuft!',
     timestamp: new Date().toISOString(),
-    activeGames: games.size,
-    connectedPlayers: players.size
+    games: gameManager.getStats(),
+    sessions: {
+      active: sessionManager.sessions.size
+    }
   });
 });
 
