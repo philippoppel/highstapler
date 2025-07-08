@@ -15,6 +15,10 @@ const io = socketIO(server, {
 app.use(cors());
 app.use(express.json());
 
+app.get('/', (req, res) => {
+    res.json({ status: 'Server läuft!', timestamp: new Date().toISOString() });
+  });
+
 // Spiel-Storage
 const games = new Map();
 const players = new Map();
@@ -473,6 +477,9 @@ app.get('/debug/games', (req, res) => {
 
 // Server starten
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server läuft auf Port ${PORT}`);
 });
+setInterval(() => {
+    console.log('Keep alive ping:', new Date().toISOString());
+  }, 14 * 60 * 1000);

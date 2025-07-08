@@ -3,7 +3,7 @@ import { Trophy, Coins, Users, HelpCircle, CheckCircle, XCircle, Wifi, WifiOff, 
 import io from 'socket.io-client';
 
 // Socket-Verbindung (ändere URL für Production)
-const SOCKET_URL = 'http://192.168.178.156:3001';
+const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
 let socket = null;
 
 const QuizGame = () => {
