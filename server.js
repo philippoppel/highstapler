@@ -508,109 +508,110 @@ class QuestionService {
     }
   }
 
-  async generateWithGroq(count, difficulty = 'medium', customCategory = null) {
-    if (!this.groqApiKey || !this.canMakeGroqRequest()) return [];
-    
-    this.groqRequestCount++;
-    
-    try {
+// Dies ist die verbesserte Funktion, die die alte komplett ersetzt.
+
+async generateWithGroq(count, difficulty = 'medium', customCategory = null) {
+  if (!this.groqApiKey || !this.canMakeGroqRequest()) return [];
+  
+  this.groqRequestCount++;
+  
+  try {
       let categoryPrompt;
       let selectedCategory;
       
       if (customCategory) {
-        // Custom category
-        selectedCategory = customCategory;
-        categoryPrompt = `about "${customCategory}"`;
+          selectedCategory = customCategory;
+          categoryPrompt = `about the specific topic "${customCategory}"`;
       } else {
-        // Standard categories
-        const categories = ['Geography', 'History', 'Science', 'Culture', 'Sports', 'General Knowledge'];
-        selectedCategory = categories[Math.floor(Math.random() * categories.length)];
-        categoryPrompt = `for the category "${selectedCategory}"`;
+          const categories = ['Geography', 'History', 'Science', 'Pop Culture', 'Sports', 'General Knowledge'];
+          selectedCategory = categories[Math.floor(Math.random() * categories.length)];
+          categoryPrompt = `for the general category "${selectedCategory}"`;
       }
       
       const difficultyMap = {
-        easy: 'easy (suitable for casual players, basic knowledge)',
-        medium: 'medium (balanced difficulty, requires some knowledge)',
-        hard: 'hard (challenging, requires deep knowledge)'
+          easy: 'easy (suitable for casual players, basic knowledge)',
+          medium: 'medium (balanced difficulty, requires some knowledge)',
+          hard: 'hard (challenging, requires deep knowledge)'
       };
       
+      // --- NEUER, INTELLIGENTERER PROMPT ---
       const prompt = `Generate ${count} high-quality English multiple-choice quiz questions ${categoryPrompt}.
-  
-  IMPORTANT REQUIREMENTS:
-  1. The questions must be factually 100% correct (as of 2024)
-  2. Exactly ONE correct answer per question
-  3. Three plausible but definitely incorrect alternatives
-  4. Questions should be ${difficultyMap[difficulty]}
-  5. ${customCategory ? `All questions MUST be specifically about ${customCategory}. Be creative and specific to this topic.` : 'Questions should be interesting and educational'}
-  6. Avoid obscure or unfair questions
-  
-  Answer ONLY with valid JSON in this format:
+
+IMPORTANT INSTRUCTIONS:
+1.  The questions should be based on the established canon or lore of the topic. For fictional topics like cartoons, "correct" means true within the show's universe.
+2.  Provide exactly ONE correct answer and THREE plausible but incorrect alternatives.
+3.  The difficulty must be: ${difficultyMap[difficulty]}.
+4.  The "category" field in the JSON response MUST EXACTLY match the topic of the generated questions.
+5.  **CRITICAL FALLBACK:** If you absolutely cannot generate questions for the specific topic "${selectedCategory}", do NOT invent nonsense. Instead, generate questions for a broader, related category (e.g., for "SpongeBob", a good fallback is "90s Cartoons" or "Pop Culture"). If you use a fallback, you MUST update the "category" field in the JSON to reflect the new, broader category.
+
+Respond ONLY with a valid JSON object in this exact format:
+{
+"questions": [
   {
-    "questions": [
-      {
-        "question": "The question here",
-        "options": ["Option A", "Option B", "Option C", "Option D"],
-        "correct": 0,
-        "category": "${selectedCategory}",
-        "difficulty": "${difficulty}"
-      }
-    ]
-  }`;
-  
+    "question": "The question text",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correct": 0,
+    "category": "${selectedCategory}",
+    "difficulty": "${difficulty}"
+  }
+]
+}`;
+
       const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-        model: 'mixtral-8x7b-32768',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert quiz master. Always answer with valid JSON only.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.8,
-        max_tokens: 2000
+          model: 'mixtral-8x7b-32768',
+          messages: [{
+              role: 'system',
+              content: 'You are an expert quiz master. You always respond with valid JSON only, following all instructions precisely.'
+          }, {
+              role: 'user',
+              content: prompt
+          }],
+          temperature: 0.8,
+          max_tokens: 2000
       }, {
-        headers: {
-          'Authorization': `Bearer ${this.groqApiKey}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
+          headers: {
+              'Authorization': `Bearer ${this.groqApiKey}`,
+              'Content-Type': 'application/json'
+          },
+          timeout: 30000
       });
-  
+
       const content = response.data.choices[0].message.content;
       let parsed;
       
       try {
-        parsed = JSON.parse(content);
+          parsed = JSON.parse(content);
       } catch (parseError) {
-        // Versuche JSON aus Antwort zu extrahieren
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          parsed = JSON.parse(jsonMatch[0]);
-        } else {
-          throw parseError;
-        }
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+              parsed = JSON.parse(jsonMatch[0]);
+          } else {
+              throw parseError;
+          }
       }
       
+      if (!parsed.questions || parsed.questions.length === 0) {
+          console.log(`Groq returned no questions for category: ${selectedCategory}`);
+          return [];
+      }
+
       const questions = parsed.questions.map(q => ({
-        ...q,
-        source: 'groq',
-        correct: parseInt(q.correct),
-        id: crypto.randomUUID()
+          ...q,
+          source: 'groq',
+          correct: parseInt(q.correct),
+          id: crypto.randomUUID()
       }));
       
       this.stats.fromGroq += questions.length;
       this.stats.totalGenerated += questions.length;
       return questions;
       
-    } catch (error) {
-      console.error('Groq Generierung Fehler:', error.response?.data || error.message);
+  } catch (error) {
+      console.error('Groq generation error:', error.response?.data || error.message);
       this.stats.errors++;
       return [];
-    }
   }
+}
 
   async fetchFromTriviaAPI(count) {
     try {
