@@ -41,7 +41,7 @@ app.use(express.json());
 // FIX: Korrigierte Route
 app.get('/', (req, res) => {
   res.json({
-    status: 'Server läuft!',
+    status: 'Server is running!',
     timestamp: new Date().toISOString(),
     games: gameManager.getStats(),
     sessions: {
@@ -52,7 +52,7 @@ app.get('/', (req, res) => {
 
 // ============= IMPROVED SESSION HANDLING =============
 
-// Erweiterte Session-Verwaltung
+// Advanced session management
 class SessionManager {
   constructor() {
     this.sessions = new Map();
@@ -148,7 +148,7 @@ class SessionManager {
     const maxAge = 30 * 60 * 1000; // 30 Minuten statt 2 Stunden
     const maxDisconnectedAge = 5 * 60 * 1000; // 5 Minuten statt 30
     
-    // Lösche auch Sessions von beendeten Spielen sofort
+    // Also delete sessions of finished games immediately
     for (const [sessionId, session] of this.sessions.entries()) {
       const game = gameManager.getGame(session.gameId);
       if (!game || game.state === 'finished') {
@@ -270,7 +270,7 @@ class GameManager {
     game.players.push(player);
     this.gamesByPlayer.set(playerId, gameId);
     
-    // Rollen zuweisen wenn 2 Spieler
+    // Assign roles if there are 2 players
     if (game.players.length === 2) {
       this.assignRoles(game);
     }
@@ -284,7 +284,7 @@ class GameManager {
   assignRoles(game) {
     if (game.players.length !== 2) return;
 
-    // Rollen zufällig verteilen
+    // Randomly assign roles
     if (Math.random() < 0.5) {
       game.challengerName = game.players[0].name;
       game.moderatorName = game.players[1].name;
@@ -314,7 +314,7 @@ class GameManager {
     game.players.splice(playerIndex, 1);
     this.gamesByPlayer.delete(playerId);
     
-    // Wenn Host verlässt, Spiel beenden
+    // If host leaves, end game
     if (game.hostId === playerId) {
       this.deleteGame(gameId);
       return null;
@@ -349,7 +349,7 @@ class GameManager {
   }
 
   getRandomCoins() {
-    return Math.floor(Math.random() * 3) + 1; // 1-3 Münzen
+    return Math.floor(Math.random() * 3) + 1; // 1-3 coins
   }
 
   cleanup() {
@@ -414,9 +414,9 @@ class QuestionService {
     try {
       const response = await axios.get('https://opentdb.com/api_token.php?command=request');
       this.sessionToken = response.data.token;
-      console.log('Trivia API Session initialisiert');
+      console.log('Trivia API session initialized');
     } catch (error) {
-      console.error('Trivia Session Fehler:', error);
+      console.error('Trivia Session error:', error);
     }
   }
 
@@ -430,7 +430,7 @@ class QuestionService {
       const fromCache = this.questionCache.splice(0, Math.min(count, this.questionCache.length));
       questions.push(...fromCache);
       this.stats.cacheHits += fromCache.length;
-      console.log(`${fromCache.length} Fragen aus Cache verwendet`);
+      console.log(`${fromCache.length} questions used from cache`);
     }
     
     const remaining = count - questions.length;
@@ -494,7 +494,7 @@ class QuestionService {
         const newQuestions = await this.generateWithGroq(10);
         this.questionCache = [...this.questionCache, ...newQuestions];
       } catch (error) {
-        console.error('Fehler beim Vorausfüllen des Caches:', error);
+        console.error('Error pre-filling cache:', error);
       }
     }
   }
@@ -639,7 +639,7 @@ Answer ONLY with valid JSON in this format:
             id: crypto.randomUUID()
           });
         } catch (error) {
-          console.error('Fehler bei Frage-Verarbeitung:', error);
+          console.error('Error processing question:', error);
           continue;
         }
       }
@@ -741,72 +741,43 @@ Answer ONLY with valid JSON in this format:
     this.questionCache = [];
     this.usedQuestions.clear();
     this.translationCache.clear();
-    console.log('Question cache geleert');
+    console.log('Question cache cleared');
   }
 }
 
 // Lokale Fragendatenbank als Fallback
 const questionDatabase = [
-  // Geografie
-  { question: "Welches ist das kleinste Land der Welt?", options: ["Monaco", "Vatikanstadt", "San Marino", "Liechtenstein"], correct: 1, category: "Geografie" },
-  { question: "Wie heißt die Hauptstadt von Island?", options: ["Oslo", "Reykjavik", "Helsinki", "Stockholm"], correct: 1, category: "Geografie" },
-  { question: "Welcher ist der längste Fluss Europas?", options: ["Donau", "Rhein", "Wolga", "Seine"], correct: 2, category: "Geografie" },
-  { question: "Wie viele Zeitzonen gibt es in Russland?", options: ["7", "9", "11", "13"], correct: 2, category: "Geografie" },
-  { question: "Welches Land hat die meisten Inseln?", options: ["Indonesien", "Schweden", "Kanada", "Japan"], correct: 1, category: "Geografie" },
-  { question: "Welcher Berg ist der höchste in Afrika?", options: ["Mount Kenya", "Kilimandscharo", "Atlas", "Drakensberg"], correct: 1, category: "Geografie" },
-  { question: "Welches Land grenzt an die meisten anderen Länder?", options: ["Russland", "China", "Brasilien", "Deutschland"], correct: 1, category: "Geografie" },
-  { question: "Wie heißt die Wüste im Süden Israels?", options: ["Sahara", "Gobi", "Negev", "Atacama"], correct: 2, category: "Geografie" },
-  
-  // Geschichte
-  { question: "In welchem Jahr wurde die UNO gegründet?", options: ["1943", "1945", "1947", "1949"], correct: 1, category: "Geschichte" },
-  { question: "Wer war der erste Mensch im Weltraum?", options: ["Neil Armstrong", "Buzz Aldrin", "Juri Gagarin", "Alan Shepard"], correct: 2, category: "Geschichte" },
-  { question: "Wie lange dauerte der Hundertjährige Krieg?", options: ["100 Jahre", "116 Jahre", "99 Jahre", "124 Jahre"], correct: 1, category: "Geschichte" },
-  { question: "Welches war das erste Land mit Frauenwahlrecht?", options: ["USA", "Neuseeland", "Schweiz", "England"], correct: 1, category: "Geschichte" },
-  { question: "In welchem Jahr endete der Erste Weltkrieg?", options: ["1916", "1917", "1918", "1919"], correct: 2, category: "Geschichte" },
-  { question: "Wer erfand das Telefon?", options: ["Thomas Edison", "Alexander Graham Bell", "Nikola Tesla", "Guglielmo Marconi"], correct: 1, category: "Geschichte" },
-  { question: "In welchem Jahr fiel die Berliner Mauer?", options: ["1987", "1988", "1989", "1990"], correct: 2, category: "Geschichte" },
-  { question: "Welches Schiff sank 1912 auf seiner Jungfernfahrt?", options: ["Lusitania", "Titanic", "Britannic", "Queen Mary"], correct: 1, category: "Geschichte" },
-  
-  // Wissenschaft
-  { question: "Wie viele Knochen hat ein erwachsener Mensch?", options: ["186", "206", "226", "246"], correct: 1, category: "Wissenschaft" },
-  { question: "Was ist die häufigste Blutgruppe?", options: ["A+", "B+", "O+", "AB+"], correct: 2, category: "Wissenschaft" },
-  { question: "Welches ist das leichteste Element?", options: ["Helium", "Wasserstoff", "Lithium", "Beryllium"], correct: 1, category: "Wissenschaft" },
-  { question: "Wie viel Prozent der Erde sind mit Wasser bedeckt?", options: ["61%", "71%", "81%", "91%"], correct: 1, category: "Wissenschaft" },
-  { question: "Was ist die Schallgeschwindigkeit?", options: ["343 m/s", "443 m/s", "543 m/s", "643 m/s"], correct: 0, category: "Wissenschaft" },
-  { question: "Welches Organ produziert Insulin?", options: ["Leber", "Niere", "Bauchspeicheldrüse", "Milz"], correct: 2, category: "Wissenschaft" },
-  { question: "Wie viele Planeten hat unser Sonnensystem?", options: ["7", "8", "9", "10"], correct: 1, category: "Wissenschaft" },
-  { question: "Was ist die chemische Formel für Wasser?", options: ["H2O", "CO2", "O2", "H2O2"], correct: 0, category: "Wissenschaft" },
-  
-  // Kultur & Unterhaltung
-  { question: "Wer komponierte 'Die Zauberflöte'?", options: ["Beethoven", "Bach", "Mozart", "Händel"], correct: 2, category: "Kultur" },
-  { question: "Wie viele Harry Potter Filme gibt es?", options: ["6", "7", "8", "9"], correct: 2, category: "Kultur" },
-  { question: "In welchem Jahr wurde Netflix gegründet?", options: ["1995", "1997", "1999", "2001"], correct: 1, category: "Kultur" },
-  { question: "Wer malte 'Die Sternennacht'?", options: ["Monet", "Van Gogh", "Picasso", "Dalí"], correct: 1, category: "Kultur" },
-  { question: "Wie viele Saiten hat eine klassische Gitarre?", options: ["4", "5", "6", "7"], correct: 2, category: "Kultur" },
-  { question: "Wer schrieb 'Romeo und Julia'?", options: ["Goethe", "Shakespeare", "Schiller", "Dante"], correct: 1, category: "Kultur" },
-  { question: "Wie viele Oscars gewann 'Titanic'?", options: ["9", "10", "11", "12"], correct: 2, category: "Kultur" },
-  { question: "Welche Band veröffentlichte 'Bohemian Rhapsody'?", options: ["The Beatles", "Queen", "Led Zeppelin", "Pink Floyd"], correct: 1, category: "Kultur" },
-  
-  // Sport
-  { question: "Wie viele Spieler sind in einer Volleyball-Mannschaft?", options: ["4", "5", "6", "7"], correct: 2, category: "Sport" },
-  { question: "In welchem Land wurden die Olympischen Spiele erfunden?", options: ["Italien", "Griechenland", "Frankreich", "England"], correct: 1, category: "Sport" },
-  { question: "Wie lang ist ein Marathon?", options: ["40,195 km", "41,195 km", "42,195 km", "43,195 km"], correct: 2, category: "Sport" },
-  { question: "Welche Sportart heißt auch 'Königin der Sportarten'?", options: ["Fußball", "Tennis", "Leichtathletik", "Schwimmen"], correct: 2, category: "Sport" },
-  { question: "Wie viele Punkte ist ein Touchdown wert?", options: ["5", "6", "7", "8"], correct: 1, category: "Sport" },
-  { question: "Wie oft findet die Fußball-WM statt?", options: ["Alle 2 Jahre", "Alle 3 Jahre", "Alle 4 Jahre", "Alle 5 Jahre"], correct: 2, category: "Sport" },
-  { question: "Wie viele Ringe hat das Olympische Symbol?", options: ["4", "5", "6", "7"], correct: 1, category: "Sport" },
-  { question: "Welches Land gewann die meisten Fußball-Weltmeisterschaften?", options: ["Deutschland", "Argentinien", "Italien", "Brasilien"], correct: 3, category: "Sport" },
-  
-  // Allgemeinwissen
-  { question: "Wie viele Zähne hat ein erwachsener Mensch normalerweise?", options: ["28", "30", "32", "34"], correct: 2, category: "Allgemeinwissen" },
-  { question: "Was ist die meistgesprochene Sprache der Welt?", options: ["Englisch", "Mandarin", "Spanisch", "Hindi"], correct: 1, category: "Allgemeinwissen" },
-  { question: "Wie viele Herzen hat ein Oktopus?", options: ["1", "2", "3", "4"], correct: 2, category: "Allgemeinwissen" },
-  { question: "Welches Tier schläft am wenigsten?", options: ["Giraffe", "Elefant", "Delfin", "Pferd"], correct: 0, category: "Allgemeinwissen" },
-  { question: "Was bedeutet 'www'?", options: ["World Wide Web", "World Web Wide", "Web World Wide", "Wide World Web"], correct: 0, category: "Allgemeinwissen" },
-  { question: "Wie viele Buchstaben hat das deutsche Alphabet?", options: ["24", "26", "28", "30"], correct: 2, category: "Allgemeinwissen" },
-  { question: "Welches ist das häufigste Element im Universum?", options: ["Sauerstoff", "Kohlenstoff", "Wasserstoff", "Helium"], correct: 2, category: "Allgemeinwissen" },
-  { question: "Wie viele Minuten hat eine Stunde?", options: ["50", "60", "70", "80"], correct: 1, category: "Allgemeinwissen" }
+  // Geography
+  { question: "What is the smallest country in the world?", options: ["Monaco", "Vatican City", "San Marino", "Liechtenstein"], correct: 1, category: "Geography" },
+  { question: "What is the capital of Iceland?", options: ["Oslo", "Reykjavik", "Helsinki", "Stockholm"], correct: 1, category: "Geography" },
+  { question: "What is the longest river in Europe?", options: ["Danube", "Rhine", "Volga", "Seine"], correct: 2, category: "Geography" },
+  { question: "How many time zones are there in Russia?", options: ["7", "9", "11", "13"], correct: 2, category: "Geography" },
+  { question: "Which country has the most islands?", options: ["Indonesia", "Sweden", "Canada", "Japan"], correct: 1, category: "Geography" },
+  { question: "What is the highest mountain in Africa?", options: ["Mount Kenya", "Kilimanjaro", "Atlas", "Drakensberg"], correct: 1, category: "Geography" },
+  { question: "Which country borders the most other countries?", options: ["Russia", "China", "Brazil", "Germany"], correct: 1, category: "Geography" },
+  { question: "What is the name of the desert in southern Israel?", options: ["Sahara", "Gobi", "Negev", "Atacama"], correct: 2, category: "Geography" },
+
+  // History
+  { question: "In which year was the UN founded?", options: ["1943", "1945", "1947", "1949"], correct: 1, category: "History" },
+  { question: "Who was the first human in space?", options: ["Neil Armstrong", "Buzz Aldrin", "Yuri Gagarin", "Alan Shepard"], correct: 2, category: "History" },
+  { question: "How long did the Hundred Years' War last?", options: ["100 years", "116 years", "99 years", "124 years"], correct: 1, category: "History" },
+  { question: "Which was the first country to grant women's suffrage?", options: ["USA", "New Zealand", "Switzerland", "England"], correct: 1, category: "History" },
+  { question: "In which year did World War I end?", options: ["1916", "1917", "1918", "1919"], correct: 2, category: "History" },
+  { question: "Who invented the telephone?", options: ["Thomas Edison", "Alexander Graham Bell", "Nikola Tesla", "Guglielmo Marconi"], correct: 1, category: "History" },
+  { question: "In which year did the Berlin Wall fall?", options: ["1987", "1988", "1989", "1990"], correct: 2, category: "History" },
+  { question: "Which ship sank on its maiden voyage in 1912?", options: ["Lusitania", "Titanic", "Britannic", "Queen Mary"], correct: 1, category: "History" },
+
+  // Science
+  { question: "How many bones does an adult human have?", options: ["186", "206", "226", "246"], correct: 1, category: "Science" },
+  { question: "What is the most common blood type?", options: ["A+", "B+", "O+", "AB+"], correct: 2, category: "Science" },
+  { question: "What is the lightest element?", options: ["Helium", "Hydrogen", "Lithium", "Beryllium"], correct: 1, category: "Science" },
+  { question: "What percentage of the Earth's surface is covered with water?", options: ["61%", "71%", "81%", "91%"], correct: 1, category: "Science" },
+  { question: "What is the speed of sound?", options: ["343 m/s", "443 m/s", "543 m/s", "643 m/s"], correct: 0, category: "Science" },
+  { question: "Which organ produces insulin?", options: ["Liver", "Kidney", "Pancreas", "Spleen"], correct: 2, category: "Science" },
+  { question: "How many planets are in our solar system?", options: ["7", "8", "9", "10"], correct: 1, category: "Science" },
+  { question: "What is the chemical formula for water?", options: ["H2O", "CO2", "O2", "H2O2"], correct: 0, category: "Science" }
 ];
+
 
 // Instanzen
 const sessionManager = new SessionManager();
@@ -967,7 +938,7 @@ io.on('connection', (socket) => {
 
       if (!game) {
         console.log('Game not found:', gameId);
-        socket.emit('error', { message: 'Spiel nicht gefunden!' });
+        socket.emit('error', { message: 'Game not found!' });
         return;
       }
 
@@ -1026,7 +997,7 @@ io.on('connection', (socket) => {
       // Neuer Spieler
       const updatedGame = gameManager.addPlayerToGame(gameId, socket.id, playerName);
       if (!updatedGame) {
-        socket.emit('error', { message: 'Konnte Spiel nicht beitreten!' });
+        socket.emit('error', { message: 'Could not join game!' });
         return;
       }
 
@@ -1175,17 +1146,17 @@ io.on('connection', (socket) => {
 
       if (decision === 'trust') {
         updates.moderatorScore = game.moderatorScore + 1;
-        roundResult = `${game.challengerName} vertraut ${game.moderatorName}. ${game.moderatorName} erhält 1 Punkt.`;
+        roundResult = `${game.challengerName} trusts ${game.moderatorName}. ${game.moderatorName} gets 1 point.`;
       } else {
         updates.challengerCoins = game.challengerCoins - 1;
         updates.showModeratorAnswer = true;
         
         if (moderatorCorrect) {
           updates.moderatorScore = game.moderatorScore + 1;
-          roundResult = `${game.challengerName} zweifelt. ${game.moderatorName} hatte recht und erhält 1 Punkt. Münze verloren!`;
+          roundResult = `${game.challengerName} dares. ${game.moderatorName} was right and gets 1 point.`;
         } else {
           updates.challengerCoins = game.challengerCoins; // Korrektur: Münze bleibt
-          roundResult = `${game.challengerName} zweifelt. ${game.moderatorName} lag falsch. Münze bleibt erhalten.`;
+          roundResult = `${game.challengerName} doubts. ${game.moderatorName} was wrong. Coin stays.`;
         }
       }
 
@@ -1267,7 +1238,7 @@ io.on('connection', (socket) => {
 
   // Spieler disconnect
   socket.on('disconnect', () => {
-    console.log('Spieler getrennt:', socket.id);
+    console.log('Player disconnected:', socket.id);
     clearInterval(heartbeatInterval);
     
     try {
@@ -1339,7 +1310,7 @@ io.on('connection', (socket) => {
           }
         }
       } else {
-        socket.emit('reconnect-failed', { message: 'Session nicht gefunden' });
+        socket.emit('reconnect-failed', { message: 'Session not found' });
       }
     } catch (error) {
       handleSocketError(socket, error, 'reconnect-attempt');
@@ -1377,9 +1348,8 @@ process.on('SIGINT', () => {
 // Server starten
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server läuft auf Port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
   console.log(`Groq API: ${questionService.groqApiKey ? 'Aktiviert' : 'Nicht konfiguriert'}`);
-  console.log(`DeepL API: ${questionService.deeplApiKey ? 'Aktiviert' : 'Nicht konfiguriert'}`);
 });
 
 // Keep-Alive für Render

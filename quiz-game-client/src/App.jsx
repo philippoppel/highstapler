@@ -85,7 +85,7 @@ const QuizGame = () => {
       auth: {}
     };
     
-    // Nur reconnectToken setzen wenn wirklich vorhanden UND gültig
+    // Only set reconnectToken if it really exists and is valid
     if (reconnectToken) {
       socketOptions.auth.reconnectToken = reconnectToken;
     }
@@ -262,7 +262,7 @@ useEffect(() => {
   const savedPlayerName = localStorage.getItem('playerName');
   const savedReconnectToken = localStorage.getItem('reconnectToken');
   
-  // Nur reconnecten wenn ALLE Daten vorhanden sind UND kein aktives Spiel läuft
+  // Only reconnect if ALL data is present AND no active game is running
   if (savedGameId && savedPlayerName && savedReconnectToken && !gameId && gameState === 'menu') {
     setPlayerName(savedPlayerName);
     setJoinGameId(savedGameId);
@@ -542,10 +542,10 @@ useEffect(() => {
                   <div className={`w-2 h-2 rounded-full animate-pulse ${player.connected ? 'bg-green-400' : 'bg-red-400'}`}></div>
                   <span className="text-white font-medium flex-1">{player.name}</span>
                   {player.role === 'host' && (
-                    <span className="text-xs bg-blue-500/30 text-blue-300 px-2 py-1 rounded-full">Host</span>
+                    <span className="text-xs bg-blue-500/30 text-blue-300 px-2 py-1 rounded-full">Game Master</span>
                   )}
                   {!player.connected && (
-                    <span className="text-xs bg-red-500/30 text-red-300 px-2 py-1 rounded-full">Offline</span>
+                    <span className="text-xs bg-red-500/30 text-red-300 px-2 py-1 rounded-full">Disconnected</span>
                   )}
                 </div>
               ))}
@@ -643,10 +643,10 @@ useEffect(() => {
               <div className={`flex items-center gap-1 mt-1 ${animateCoins ? 'animate-shake' : ''}`}>
                 <Coins className="text-yellow-400 w-3 h-3" />
                 <span className={`font-bold text-sm ${gameData.challengerCoins <= 1 ? 'text-red-400' : 'text-yellow-400'}`}>
-                  {gameData.challengerCoins} {gameData.challengerCoins === 1 ? 'Münze' : 'Münzen'}
+                  {gameData.challengerCoins} {gameData.challengerCoins === 1 ? 'coin' : 'coins'}
                 </span>
               </div>
-              {gameRole === 'challenger' && <div className="text-xs text-blue-300 mt-1">Das bist du!</div>}
+              {gameRole === 'challenger' && <div className="text-xs text-blue-300 mt-1">That's you!</div>}
             </div>
             
             <div className={`bg-white/10 backdrop-blur-lg rounded-xl p-3 transform transition-all ${gameRole === 'moderator' ? 'ring-2 ring-purple-400 scale-105' : ''}`}>
@@ -656,7 +656,7 @@ useEffect(() => {
               </div>
               <div className="text-purple-400 text-xl font-bold">{gameData.moderatorScore}</div>
               <div className="text-gray-400 text-xs mt-1">Moderator</div>
-              {gameRole === 'moderator' && <div className="text-xs text-purple-300 mt-1">Das bist du!</div>}
+              {gameRole === 'moderator' && <div className="text-xs text-purple-300 mt-1">That's you!</div>}
             </div>
           </div>
 
@@ -668,7 +668,7 @@ useEffect(() => {
           {/* Current Question */}
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6">
             <div className="text-center mb-4">
-              <div className="text-xs text-gray-400 mb-1">Kategorie: {currentQ.category}</div>
+              <div className="text-xs text-gray-400 mb-1">Category: {currentQ.category}</div>
               <h2 className="text-xl font-bold text-white">{currentQ.question}</h2>
             </div>
             
@@ -692,7 +692,7 @@ useEffect(() => {
                     disabled={!myAnswer || myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered) || !connected}
                     className="bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-8 rounded-xl hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
                   >
-                    {!connected ? 'Verbindung unterbrochen' : (myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered)) ? 'Antwort abgegeben' : 'Antwort abgeben'}
+                    {!connected ? 'Connection lost' : (myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered)) ? 'Answered' : 'Answer'}
                   </button>
                   {(myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered)) && (
                     <div className="mt-3">
@@ -776,12 +776,12 @@ useEffect(() => {
                   </div>
                 </div>
                 <div className={`rounded-xl p-4 mb-6 ${gameData.roundResult?.includes('erhält 1 Punkt') ? 'bg-blue-500/20' : 'bg-purple-500/20'}`}>
-                  <p className="text-white font-medium">{gameData.roundResult}</p>
+                  <p className="text-white font-medium">{gameData.roundResult && typeof gameData.roundResult === 'string' ? gameData.roundResult.replace('erhält 1 Punkt', 'gets 1 point').replace('verloren', 'lost').replace('bleibt erhalten', 'is retained') : gameData.roundResult}</p>
                   {gameData.decision === 'doubt' && gameData.roundResult?.includes('verloren') && (
-                    <div className="mt-2 flex items-center justify-center gap-2 text-red-400"><TrendingDown className="w-4 h-4" /><span className="text-sm">Eine Münze verloren!</span></div>
+                    <div className="mt-2 flex items-center justify-center gap-2 text-red-400"><TrendingDown className="w-4 h-4" /><span className="text-sm">Lost one coin!</span></div>
                   )}
                   {gameData.decision === 'doubt' && gameData.roundResult?.includes('bleibt erhalten') && (
-                    <div className="mt-2 flex items-center justify-center gap-2 text-green-400"><TrendingUp className="w-4 h-4" /><span className="text-sm">Münze gerettet!</span></div>
+                    <div className="mt-2 flex items-center justify-center gap-2 text-green-400"><TrendingUp className="w-4 h-4" /><span className="text-sm">Coin saved!</span></div>
                   )}
                 </div>
                 <button
@@ -789,7 +789,7 @@ useEffect(() => {
                   disabled={!connected}
                   className="bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-8 rounded-xl hover:from-green-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
                 >
-                  {connected ? 'Nächste Runde' : 'Verbindung unterbrochen'}
+                  {connected ? 'Next round' : 'Connection lost'}
                 </button>
               </div>
             )}
@@ -825,7 +825,7 @@ useEffect(() => {
                 <p className="text-2xl text-blue-400 font-bold">{gameData.challengerScore}</p>
                 <div className="flex items-center justify-center gap-1 mt-1">
                   <Coins className="w-4 h-4 text-yellow-400" />
-                  <span className="text-sm text-gray-300">{gameData.challengerCoins} übrig</span>
+                  <span className="text-sm text-gray-300">{gameData.challengerCoins} left</span>
                 </div>
               </div>
               <div className={`bg-white/20 rounded-xl p-4 ${gameData.winner === gameData.moderatorName ? 'ring-2 ring-yellow-400' : ''}`}>
@@ -838,7 +838,7 @@ useEffect(() => {
             {gameData.challengerCoins <= 0 && gameData.winner === gameData.moderatorName && (
               <div className="bg-red-500/20 rounded-xl p-3 mb-4">
                 <p className="text-red-400 text-sm flex items-center justify-center gap-2">
-                  <Coins className="w-4 h-4" /> Herausforderer hat alle Münzen verloren!
+                  <Coins className="w-4 h-4" /> The challenger has lost all coins!
                 </p>
               </div>
             )}
@@ -859,23 +859,23 @@ useEffect(() => {
                 }}
                 className="w-full bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 transition-all transform hover:scale-105 active:scale-95"
               >
-                Neues Spiel
+                New Game
               </button>
               <button
                 onClick={() => {
                   if (navigator.share) {
                     navigator.share({
-                      title: 'Vertrauen oder Zweifeln',
-                      text: `Ich habe gerade ${gameData.winner === gameData.challengerName ? 'als Herausforderer' : 'als Moderator'} ${gameData.winner === (gameRole === 'challenger' ? gameData.challengerName : gameData.moderatorName) ? 'gewonnen' : 'verloren'}!`,
+                      title: 'Trust or Doubt',
+                      text: `I just played as ${gameData.winner === gameData.challengerName ? 'the challenger' : 'the moderator'} and ${gameData.winner === (gameRole === 'challenger' ? gameData.challengerName : gameData.moderatorName) ? 'won' : 'lost'}!`, 
                       url: window.location.href
                     });
                   } else {
-                    navigator.clipboard?.writeText(`Ich habe gerade Vertrauen oder Zweifeln gespielt! ${window.location.href}`);
+                    navigator.clipboard?.writeText(`I just played Trust or Doubt! ${window.location.href}`);
                   }
                 }}
                 className="w-full bg-white/20 text-white font-bold py-2 px-6 rounded-xl hover:bg-white/30 transition-all"
               >
-                Ergebnis teilen
+                Share result
               </button>
             </div>
           </div>
