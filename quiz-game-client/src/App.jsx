@@ -36,7 +36,11 @@ const QuizGame = () => {
   const [animateCoins, setAnimateCoins] = useState(false);
   const [showDecisionAnimation, setShowDecisionAnimation] = useState(false);
   const [lastPing, setLastPing] = useState(Date.now());
+  const [wantToSkip, setWantToSkip] = useState(false);
+const [skipRequested, setSkipRequested] = useState(false);
 
+const [gameDifficulty, setGameDifficulty] = useState('medium');
+const [gameCategory, setGameCategory] = useState('');
   // Heartbeat system to check connection health
   useEffect(() => {
     const interval = setInterval(() => {
@@ -55,6 +59,18 @@ const QuizGame = () => {
     if (timeSinceLastPing < 35000) return 'good';
     if (timeSinceLastPing < 60000) return 'poor';
     return 'bad';
+  };
+
+  const requestSkip = () => {
+    if (!connected || skipRequested) return;
+    setSkipRequested(true);
+    socketRef.current.emit('request-skip', { gameId, reason: 'Question unclear or invalid' });
+  };
+
+  const cancelSkip = () => {
+    if (!connected) return;
+    setSkipRequested(false);
+    socketRef.current.emit('cancel-skip', { gameId });
   };
 
   const clearAllSessionData = () => {
@@ -172,6 +188,25 @@ const QuizGame = () => {
       localStorage.setItem('playerName', playerName);
     });
 
+    socketRef.current.on('skip-requested', (data) => {
+      console.log('Skip requested by:', data.playerName);
+      setWantToSkip(true);
+    });
+    
+    socketRef.current.on('skip-cancelled', () => {
+      console.log('Skip cancelled');
+      setWantToSkip(false);
+      setSkipRequested(false);
+    });
+    
+    socketRef.current.on('question-skipped', () => {
+      console.log('Question skipped');
+      setWantToSkip(false);
+      setSkipRequested(false);
+      setMyAnswer('');
+      setMyAnswered(false);
+    });
+
     socketRef.current.on('game-updated', (game) => {
       console.log('Game updated:', game);
 
@@ -197,6 +232,12 @@ const QuizGame = () => {
       if (game.phase === 'result' && gameData.phase === 'decision') {
         setShowDecisionAnimation(true);
         setTimeout(() => setShowDecisionAnimation(false), 2000);
+      }
+      if (game.phase === 'answering' && !game.challengerAnswered && !game.moderatorAnswered) {
+        setMyAnswer('');
+        setMyAnswered(false);
+        setWantToSkip(false);
+        setSkipRequested(false);
       }
       if (game.state === 'finished') {
         clearAllSessionData();
@@ -308,7 +349,13 @@ useEffect(() => {
 
   const createGame = () => {
     if (!playerName.trim() || !connected) return;
-    socketRef.current.emit('create-game', { playerName: playerName.trim() });
+    socketRef.current.emit('create-game', { 
+      playerName: playerName.trim(),
+      settings: {
+        difficulty: gameDifficulty,
+        category: gameCategory.trim() || null
+      }
+    });
   };
 
   const joinGame = () => {
@@ -412,34 +459,76 @@ useEffect(() => {
           </div>
           
           <div className="space-y-4">
-            {/* Create Game */}
-            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 hover:bg-white/15 transition-all">
-              <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <Users className="text-blue-400" /> New Game
-              </h2>
-              <div className="space-y-4">
-                <div>
-                  <input
-                    type="text"
-                    value={playerName}
-                    onChange={(e) => setPlayerName(e.target.value)}
-                    className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-blue-400 focus:outline-none transition-all"
-                    placeholder="Your name (2-15 characters)"
-                    maxLength={15}
-                  />
-                  {playerName && !isValidPlayerName(playerName) && (
-                    <p className="text-red-400 text-xs mt-1">Name must be 2-15 characters</p>
-                  )}
-                </div>
-                <button
-                  onClick={createGame}
-                  disabled={!isValidPlayerName(playerName) || !connected}
-                  className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-6 rounded-xl hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
-                >
-                  {connected ? 'Create Game' : 'Connecting...'}
-                </button>
-              </div>
-            </div>
+{/* Create Game */}
+<div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 hover:bg-white/15 transition-all">
+  <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+    <Users className="text-blue-400" /> New Game
+  </h2>
+  <div className="space-y-4">
+    <div>
+      <input
+        type="text"
+        value={playerName}
+        onChange={(e) => setPlayerName(e.target.value)}
+        className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-blue-400 focus:outline-none transition-all"
+        placeholder="Your name (2-15 characters)"
+        maxLength={15}
+      />
+      {playerName && !isValidPlayerName(playerName) && (
+        <p className="text-red-400 text-xs mt-1">Name must be 2-15 characters</p>
+      )}
+    </div>
+    
+    {/* Difficulty Selection */}
+    <div>
+      <label className="text-white text-sm mb-2 block">Difficulty</label>
+      <div className="grid grid-cols-3 gap-2">
+        <button
+          onClick={() => setGameDifficulty('easy')}
+          className={`p-2 rounded-lg transition-all ${gameDifficulty === 'easy' ? 'bg-green-500/30 border-green-400 border-2' : 'bg-white/10 border-white/30 border'}`}
+        >
+          <span className="text-white text-sm">Easy</span>
+        </button>
+        <button
+          onClick={() => setGameDifficulty('medium')}
+          className={`p-2 rounded-lg transition-all ${gameDifficulty === 'medium' ? 'bg-yellow-500/30 border-yellow-400 border-2' : 'bg-white/10 border-white/30 border'}`}
+        >
+          <span className="text-white text-sm">Medium</span>
+        </button>
+        <button
+          onClick={() => setGameDifficulty('hard')}
+          className={`p-2 rounded-lg transition-all ${gameDifficulty === 'hard' ? 'bg-red-500/30 border-red-400 border-2' : 'bg-white/10 border-white/30 border'}`}
+        >
+          <span className="text-white text-sm">Hard</span>
+        </button>
+      </div>
+    </div>
+    
+    {/* Category Input */}
+    <div>
+      <label className="text-white text-sm mb-2 block">
+        Topic/Category <span className="text-gray-400">(optional)</span>
+      </label>
+      <input
+        type="text"
+        value={gameCategory}
+        onChange={(e) => setGameCategory(e.target.value)}
+        className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-blue-400 focus:outline-none transition-all"
+        placeholder="e.g. SpongeBob, Marvel, History..."
+        maxLength={30}
+      />
+      <p className="text-gray-400 text-xs mt-1">Leave empty for general knowledge</p>
+    </div>
+    
+    <button
+      onClick={createGame}
+      disabled={!isValidPlayerName(playerName) || !connected}
+      className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-6 rounded-xl hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
+    >
+      {connected ? 'Create Game' : 'Connecting...'}
+    </button>
+  </div>
+</div>
             
             {/* Join Game */}
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 hover:bg-white/15 transition-all">
@@ -705,6 +794,38 @@ useEffect(() => {
                   >
                     {!connected ? 'Connection lost' : (myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered)) ? 'Answered' : 'Answer'}
                   </button>
+                  {/* Skip/Report Section */}
+<div className="mt-4 text-center">
+  {!skipRequested && !gameData.skipRequests?.includes(socketRef.current?.id) ? (
+    <button
+      onClick={requestSkip}
+      disabled={!connected}
+      className="text-gray-400 hover:text-white text-sm underline transition-all"
+    >
+      Report/Skip this question
+    </button>
+  ) : (
+    <div className="bg-yellow-500/20 rounded-xl p-3 inline-block">
+      <p className="text-yellow-400 text-sm">
+        {skipRequested ? 'You requested to skip this question' : `${gameData.skipRequestedBy || 'Other player'} wants to skip`}
+      </p>
+      {skipRequested && (
+        <button
+          onClick={cancelSkip}
+          className="text-xs text-yellow-300 hover:text-yellow-100 underline mt-1"
+        >
+          Cancel request
+        </button>
+      )}
+    </div>
+  )}
+  
+  {gameData.skipRequests?.length === 2 && (
+    <p className="text-green-400 text-sm mt-2 animate-pulse">
+      Both players agreed - skipping question...
+    </p>
+  )}
+</div>
                   {(myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered)) && (
                     <div className="mt-3">
                       <p className="text-gray-400 text-sm animate-pulse">Waiting for the other player's answer...</p>

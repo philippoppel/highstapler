@@ -183,7 +183,7 @@ class GameManager {
     this.cleanupInterval = setInterval(() => this.cleanup(), 5 * 60 * 1000);
   }
 
-  createGame(hostId, hostName) {
+  createGame(hostId, hostName, settings = {}) {
     const gameId = this.generateGameId();
     const initialCoins = this.getRandomCoins();
     
@@ -201,7 +201,11 @@ class GameManager {
       }],
       questions: [],
       currentQuestion: 0,
-      state: 'lobby', // lobby, setup, playing, paused, finished
+      state: 'lobby',
+      settings: {
+        difficulty: settings.difficulty || 'medium',
+        category: settings.category || null
+      },
       challengerScore: 0,
       moderatorScore: 0,
       challengerCoins: initialCoins,
@@ -210,7 +214,7 @@ class GameManager {
       moderatorName: '',
       challengerId: null,
       moderatorId: null,
-      phase: 'answering', // answering, decision, result
+      phase: 'answering',
       challengerAnswer: '',
       moderatorAnswer: '',
       challengerAnswered: false,
@@ -223,9 +227,11 @@ class GameManager {
       usedQuestions: [],
       createdAt: Date.now(),
       lastActivity: Date.now(),
-      version: 1 // Für Synchronisation
+      version: 1,
+      skipRequests: [],
+skipRequestedBy: null
     };
-
+  
     this.games.set(gameId, game);
     this.gamesByPlayer.set(hostId, gameId);
     
@@ -421,8 +427,10 @@ class QuestionService {
     }
   }
 
-  async getQuestions(count = 10, gameId = null) {
-    console.log(`Generiere ${count} neue Fragen für Spiel ${gameId}`);
+  async getQuestions(count = 10, gameId = null, settings = {}) {
+    const { difficulty = 'medium', category = null } = settings;
+    
+    console.log(`Generiere ${count} Fragen für Spiel ${gameId} - Difficulty: ${difficulty}, Category: ${category || 'General'}`);
     
     let questions = [];
     
@@ -439,10 +447,10 @@ class QuestionService {
       return this.deduplicateQuestions(questions, gameId);
     }
     
-    // Versuche Groq AI (mit Rate Limiting)
+    // Versuche Groq AI mit Settings
     if (this.groqApiKey && this.canMakeGroqRequest()) {
       try {
-        const groqQuestions = await this.generateWithGroq(Math.ceil(remaining * 0.7));
+        const groqQuestions = await this.generateWithGroq(Math.ceil(remaining * 0.7), difficulty, category);
         questions.push(...groqQuestions);
         console.log(`${groqQuestions.length} Fragen von Groq generiert`);
       } catch (error) {
@@ -500,44 +508,61 @@ class QuestionService {
     }
   }
 
-  async generateWithGroq(count) {
+  async generateWithGroq(count, difficulty = 'medium', customCategory = null) {
     if (!this.groqApiKey || !this.canMakeGroqRequest()) return [];
     
     this.groqRequestCount++;
     
     try {
-      const categories = ['Geography', 'History', 'Science', 'Culture', 'Sports', 'General Knowledge'];
-      const selectedCategory = categories[Math.floor(Math.random() * categories.length)];
+      let categoryPrompt;
+      let selectedCategory;
       
-      const prompt = `Generate ${count} high-quality English multiple-choice quiz questions for the category "${selectedCategory}".
-
-IMPORTANT REQUIREMENTS:
-1. The questions must be factually 100% correct (as of 2024)
-2. Exactly ONE correct answer per question
-3. Three plausible but definitely incorrect alternatives
-4. Questions should be interesting and educational
-5. Various difficulty levels
-6. Avoid very difficult or obscure questions
-
-Answer ONLY with valid JSON in this format:
-{
-  "questions": [
-    {
-      "question": "The question here",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correct": 0,
-      "category": "${selectedCategory}",
-      "difficulty": "medium"
-    }
-  ]
-}`;
-
+      if (customCategory) {
+        // Custom category
+        selectedCategory = customCategory;
+        categoryPrompt = `about "${customCategory}"`;
+      } else {
+        // Standard categories
+        const categories = ['Geography', 'History', 'Science', 'Culture', 'Sports', 'General Knowledge'];
+        selectedCategory = categories[Math.floor(Math.random() * categories.length)];
+        categoryPrompt = `for the category "${selectedCategory}"`;
+      }
+      
+      const difficultyMap = {
+        easy: 'easy (suitable for casual players, basic knowledge)',
+        medium: 'medium (balanced difficulty, requires some knowledge)',
+        hard: 'hard (challenging, requires deep knowledge)'
+      };
+      
+      const prompt = `Generate ${count} high-quality English multiple-choice quiz questions ${categoryPrompt}.
+  
+  IMPORTANT REQUIREMENTS:
+  1. The questions must be factually 100% correct (as of 2024)
+  2. Exactly ONE correct answer per question
+  3. Three plausible but definitely incorrect alternatives
+  4. Questions should be ${difficultyMap[difficulty]}
+  5. ${customCategory ? `All questions MUST be specifically about ${customCategory}. Be creative and specific to this topic.` : 'Questions should be interesting and educational'}
+  6. Avoid obscure or unfair questions
+  
+  Answer ONLY with valid JSON in this format:
+  {
+    "questions": [
+      {
+        "question": "The question here",
+        "options": ["Option A", "Option B", "Option C", "Option D"],
+        "correct": 0,
+        "category": "${selectedCategory}",
+        "difficulty": "${difficulty}"
+      }
+    ]
+  }`;
+  
       const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
         model: 'mixtral-8x7b-32768',
         messages: [
           {
             role: 'system',
-            content: 'You are an expert in quiz questions. Always answer with valid JSON only.'
+            content: 'You are an expert quiz master. Always answer with valid JSON only.'
           },
           {
             role: 'user',
@@ -553,7 +578,7 @@ Answer ONLY with valid JSON in this format:
         },
         timeout: 30000
       });
-
+  
       const content = response.data.choices[0].message.content;
       let parsed;
       
@@ -786,9 +811,9 @@ const gameManager = new GameManager();
 const questionService = new QuestionService();
 
 // Hilfsfunktionen
-const getRandomQuestions = async (count = 10, gameId = null) => {
+const getRandomQuestions = async (count = 10, gameId = null, settings = {}) => {
   try {
-    return await questionService.getQuestions(count, gameId);
+    return await questionService.getQuestions(count, gameId, settings);
   } catch (error) {
     console.error('Fehler bei Fragengenerierung:', error);
     // Fallback auf lokale Fragen
@@ -902,7 +927,11 @@ io.on('connection', (socket) => {
   socket.on('create-game', async (data) => {
     try {
       console.log('CREATE GAME:', data);
-      const game = gameManager.createGame(socket.id, data.playerName);
+      const game = gameManager.createGame(
+        socket.id, 
+        data.playerName,
+        data.settings || {}
+      );
       
       // Session erstellen
       const { sessionId, reconnectToken } = sessionManager.createSession(
@@ -913,8 +942,8 @@ io.on('connection', (socket) => {
         true
       );
       
-      // Fragen laden
-      game.questions = await getRandomQuestions(30, game.id);
+      // Fragen mit Settings laden
+      game.questions = await questionService.getQuestions(30, game.id, game.settings);
       
       socket.join(game.id);
       socket.emit('game-created', { 
@@ -924,7 +953,7 @@ io.on('connection', (socket) => {
         reconnectToken
       });
       
-      console.log('Game created:', game.id, 'by', data.playerName);
+      console.log('Game created:', game.id, 'by', data.playerName, 'with settings:', game.settings);
     } catch (error) {
       handleSocketError(socket, error, 'create-game');
     }
@@ -1039,30 +1068,30 @@ io.on('connection', (socket) => {
       console.log('START GAME:', data);
       const { gameId } = data;
       const game = gameManager.getGame(gameId);
-
+  
       if (!game) {
         console.log('Game not found for start:', gameId);
         return;
       }
-
+  
       const session = sessionManager.findSessionBySocket(socket.id);
       if (!session || !session.isHost) {
         console.log('Non-host tried to start game:', socket.id);
         return;
       }
-
-      // Zusätzliche Fragen laden falls nötig
+  
+      // Zusätzliche Fragen mit Settings laden falls nötig
       if (game.questions.length < 10) {
-        const newQuestions = await getRandomQuestions(20, gameId);
+        const newQuestions = await questionService.getQuestions(20, gameId, game.settings);
         game.questions.push(...newQuestions);
       }
-
+  
       gameManager.updateGame(gameId, {
         state: 'playing',
         phase: 'answering',
         currentQuestion: 0
       });
-
+  
       console.log('Game started:', gameId);
       io.to(gameId).emit('game-started', game);
     } catch (error) {
@@ -1171,13 +1200,103 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Skip/Report Question
+socket.on('request-skip', (data) => {
+  try {
+    console.log('SKIP REQUEST:', data);
+    const { gameId, reason } = data;
+    const game = gameManager.getGame(gameId);
+    
+    if (!game || game.state !== 'playing' || game.phase !== 'answering') {
+      return;
+    }
+    
+    const player = game.players.find(p => p.id === socket.id);
+    if (!player) return;
+    
+    // Check if player already requested skip
+    if (game.skipRequests.includes(socket.id)) {
+      return;
+    }
+    
+    game.skipRequests.push(socket.id);
+    game.skipRequestedBy = player.name;
+    
+    // Notify other player
+    socket.to(gameId).emit('skip-requested', { 
+      playerName: player.name,
+      reason 
+    });
+    
+    // If both players want to skip, skip the question
+    if (game.skipRequests.length === 2) {
+      console.log('Both players agreed to skip question');
+      
+      // Mark question as reported/problematic
+      const currentQ = game.questions[game.currentQuestion];
+      if (currentQ) {
+        currentQ.reported = true;
+        currentQ.reportReason = reason;
+      }
+      
+      // Move to next question
+      gameManager.updateGame(gameId, {
+        currentQuestion: game.currentQuestion + 1,
+        phase: 'answering',
+        challengerAnswer: '',
+        moderatorAnswer: '',
+        challengerAnswered: false,
+        moderatorAnswered: false,
+        challengerCorrect: false,
+        skipRequests: [],
+        skipRequestedBy: null
+      });
+      
+      io.to(gameId).emit('question-skipped');
+      io.to(gameId).emit('game-updated', game);
+    } else {
+      gameManager.updateGame(gameId, {});
+      io.to(gameId).emit('game-updated', game);
+    }
+  } catch (error) {
+    handleSocketError(socket, error, 'request-skip');
+  }
+});
+
+// Cancel Skip Request
+socket.on('cancel-skip', (data) => {
+  try {
+    console.log('CANCEL SKIP:', data);
+    const { gameId } = data;
+    const game = gameManager.getGame(gameId);
+    
+    if (!game) return;
+    
+    // Remove player from skip requests
+    game.skipRequests = game.skipRequests.filter(id => id !== socket.id);
+    
+    if (game.skipRequests.length === 0) {
+      game.skipRequestedBy = null;
+    }
+    
+    gameManager.updateGame(gameId, {});
+    
+    io.to(gameId).emit('skip-cancelled');
+    io.to(gameId).emit('game-updated', game);
+  } catch (error) {
+    handleSocketError(socket, error, 'cancel-skip');
+  }
+});
+
   // Nächste Runde
   socket.on('next-round', async (data) => {
     try {
       console.log('NEXT ROUND:', data);
       const { gameId } = data;
       const game = gameManager.getGame(gameId);
-
+      updates.skipRequests = [];
+      updates.skipRequestedBy = null;
+      
       if (!game) return;
 
       // Gewinnbedingungen prüfen
@@ -1211,11 +1330,12 @@ io.on('connection', (socket) => {
         updates.currentQuestion = game.currentQuestion + 1;
         
         // Falls wir mehr Fragen brauchen, füge neue hinzu
-        if (game.currentQuestion >= game.questions.length - 5) {
-          const newQuestions = await getRandomQuestions(10, gameId);
-          game.questions.push(...newQuestions);
-          console.log(`${newQuestions.length} neue Fragen zum Spiel ${gameId} hinzugefügt`);
-        }
+// Falls wir mehr Fragen brauchen, füge neue hinzu
+if (game.currentQuestion >= game.questions.length - 5) {
+  const newQuestions = await questionService.getQuestions(10, gameId, game.settings);
+  game.questions.push(...newQuestions);
+  console.log(`${newQuestions.length} neue Fragen zum Spiel ${gameId} hinzugefügt`);
+}
         
         updates.phase = 'answering';
         updates.challengerAnswer = '';
