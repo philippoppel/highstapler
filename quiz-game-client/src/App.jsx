@@ -57,10 +57,25 @@ const QuizGame = () => {
     return 'bad';
   };
 
+  const clearAllSessionData = () => {
+    localStorage.removeItem('sessionId');
+    localStorage.removeItem('reconnectToken');
+    localStorage.removeItem('gameId');
+    localStorage.removeItem('playerName');
+    setSessionId('');
+    setReconnectToken('');
+    setGameId('');
+    setPlayerRole('');
+    setGameRole('');
+  };
+
   // Initialize socket connection and set up event listeners
   const initializeSocket = useCallback(() => {
+    // Cleanup old socket completely
     if (socketRef.current) {
+      socketRef.current.removeAllListeners();
       socketRef.current.disconnect();
+      socketRef.current = null;
     }
 
     const socketOptions = {
@@ -69,8 +84,9 @@ const QuizGame = () => {
       forceNew: true,
       auth: {}
     };
-
-    if (reconnectToken) {
+    
+    // Nur reconnectToken setzen wenn wirklich vorhanden UND gültig
+    if (reconnectToken && gameState !== 'finished' && gameState !== 'menu') {
       socketOptions.auth.reconnectToken = reconnectToken;
     }
 
@@ -176,10 +192,15 @@ const QuizGame = () => {
         setTimeout(() => setShowDecisionAnimation(false), 2000);
       }
       if (game.state === 'finished') {
-        localStorage.removeItem('gameId');
-        localStorage.removeItem('playerName');
-        localStorage.removeItem('sessionId');
-        localStorage.removeItem('reconnectToken');
+        clearAllSessionData();
+        // Socket komplett neu initialisieren
+        if (socketRef.current) {
+          socketRef.current.disconnect();
+          socketRef.current = null;
+        }
+        setTimeout(() => {
+          initializeSocket();
+        }, 100);
       }
     });
 
@@ -216,12 +237,7 @@ const QuizGame = () => {
       console.log('Reconnect failed:', data);
       setReconnecting(false);
       setConnectionError('Wiederverbindung fehlgeschlagen');
-      localStorage.removeItem('sessionId');
-      localStorage.removeItem('reconnectToken');
-      localStorage.removeItem('gameId');
-      localStorage.removeItem('playerName');
-      setReconnectToken('');
-      setSessionId('');
+      clearAllSessionData();
     });
 
     socketRef.current.on('error', (data) => {
@@ -240,17 +256,25 @@ const QuizGame = () => {
     }
   }, [reconnectToken]);
 
-  // Check for reconnect data on page load
-  useEffect(() => {
-    const savedGameId = localStorage.getItem('gameId');
-    const savedPlayerName = localStorage.getItem('playerName');
-    const savedReconnectToken = localStorage.getItem('reconnectToken');
-    if (savedGameId && savedPlayerName && savedReconnectToken) {
-      setPlayerName(savedPlayerName);
-      setJoinGameId(savedGameId);
-      setReconnectToken(savedReconnectToken);
-    }
-  }, []);
+// Check for reconnect data on page load
+useEffect(() => {
+  const savedGameId = localStorage.getItem('gameId');
+  const savedPlayerName = localStorage.getItem('playerName');
+  const savedReconnectToken = localStorage.getItem('reconnectToken');
+  
+  // Nur reconnecten wenn ALLE Daten vorhanden sind UND kein aktives Spiel läuft
+  if (savedGameId && savedPlayerName && savedReconnectToken && !gameId && gameState === 'menu') {
+    setPlayerName(savedPlayerName);
+    setJoinGameId(savedGameId);
+    setReconnectToken(savedReconnectToken);
+    // Automatisch reconnect versuchen
+    setTimeout(() => {
+      if (socketRef.current?.connected) {
+        attemptReconnect();
+      }
+    }, 500);
+  }
+}, []); // Leere dependency array!
 
   // Initialize socket on mount
   useEffect(() => {

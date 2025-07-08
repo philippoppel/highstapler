@@ -145,13 +145,20 @@ class SessionManager {
 
   cleanup() {
     const now = Date.now();
-    const maxAge = 2 * 60 * 60 * 1000; // 2 Stunden
-    const maxDisconnectedAge = 30 * 60 * 1000; // 30 Minuten disconnected
-
+    const maxAge = 30 * 60 * 1000; // 30 Minuten statt 2 Stunden
+    const maxDisconnectedAge = 5 * 60 * 1000; // 5 Minuten statt 30
+    
+    // Lösche auch Sessions von beendeten Spielen sofort
     for (const [sessionId, session] of this.sessions.entries()) {
+      const game = gameManager.getGame(session.gameId);
+      if (!game || game.state === 'finished') {
+        this.deleteSession(sessionId);
+        continue;
+      }
+      
       const age = now - session.createdAt;
       const disconnectedAge = session.disconnectedAt ? now - session.disconnectedAt : 0;
-
+  
       if (age > maxAge || disconnectedAge > maxDisconnectedAge) {
         this.deleteSession(sessionId);
         console.log('Session cleaned up:', sessionId);
@@ -1299,6 +1306,20 @@ io.on('connection', (socket) => {
       } else if (game.challengerCoins <= 0) {
         updates.winner = game.moderatorName;
         updates.state = 'finished';
+      }
+      
+      // Wenn Spiel beendet, lösche alle Sessions
+      if (updates.state === 'finished') {
+        // Lösche alle Sessions für dieses Spiel
+        const sessions = sessionManager.findSessionsByGame(gameId);
+        sessions.forEach(session => {
+          sessionManager.deleteSession(session.id);
+        });
+        
+        // Optional: Lösche das Spiel nach kurzer Zeit
+        setTimeout(() => {
+          gameManager.deleteGame(gameId);
+        }, 5000);
       } else {
         // Nächste Frage
         updates.currentQuestion = game.currentQuestion + 1;
