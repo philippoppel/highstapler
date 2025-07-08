@@ -86,7 +86,7 @@ const QuizGame = () => {
     };
     
     // Nur reconnectToken setzen wenn wirklich vorhanden UND gültig
-    if (reconnectToken && gameState !== 'finished' && gameState !== 'menu') {
+    if (reconnectToken) {
       socketOptions.auth.reconnectToken = reconnectToken;
     }
 
@@ -105,7 +105,7 @@ const QuizGame = () => {
       console.log('Disconnected:', reason);
       setConnected(false);
       if (reason === 'io server disconnect') {
-        setConnectionError('Server hat Verbindung getrennt');
+        setConnectionError('Server has disconnected');
       } else {
         setReconnecting(true);
         if (reconnectToken) {
@@ -116,7 +116,7 @@ const QuizGame = () => {
 
     socketRef.current.on('connect_error', (error) => {
       console.error('Connection error:', error);
-      setConnectionError('Verbindung zum Server fehlgeschlagen');
+      setConnectionError('Failed to connect to server');
       setConnected(false);
       setReconnecting(false);
     });
@@ -212,7 +212,7 @@ const QuizGame = () => {
 
     socketRef.current.on('game-paused', (game) => {
       setGameData(game);
-      setConnectionError('Ein Spieler hat das Spiel verlassen. Spiel pausiert.');
+      setConnectionError('A player has left the game. Game paused.');
     });
 
     socketRef.current.on('game-resumed', (game) => {
@@ -221,7 +221,7 @@ const QuizGame = () => {
     });
 
     socketRef.current.on('player-disconnected', (data) => {
-      setConnectionError(`${data.playerName} hat das Spiel verlassen.`);
+      setConnectionError(`${data.playerName} has left the game.`);
     });
 
     socketRef.current.on('reconnect-success', (data) => {
@@ -236,16 +236,16 @@ const QuizGame = () => {
     socketRef.current.on('reconnect-failed', (data) => {
       console.log('Reconnect failed:', data);
       setReconnecting(false);
-      setConnectionError('Wiederverbindung fehlgeschlagen');
+      setConnectionError('Reconnection failed');
       clearAllSessionData();
     });
 
     socketRef.current.on('error', (data) => {
       console.error('Socket error:', data);
-      setConnectionError(data.message || 'Ein Fehler ist aufgetreten');
+      setConnectionError(data.message || 'An error occurred');
     });
 
-  }, [reconnectToken, playerName, gameData.phase, gameData.challengerScore, gameData.challengerCoins]);
+  }, []); // Keine Dependencies!
 
   // Attempt reconnection with token
   const attemptReconnect = useCallback(() => {
@@ -281,10 +281,12 @@ useEffect(() => {
     initializeSocket();
     return () => {
       if (socketRef.current) {
+        socketRef.current.removeAllListeners();
         socketRef.current.disconnect();
+        socketRef.current = null;
       }
     };
-  }, [initializeSocket]);
+  }, []); // Leere dependency array!
 
   // --- Game Actions ---
   const retryConnection = () => {
@@ -365,7 +367,7 @@ useEffect(() => {
             <span className="text-red-400 text-sm">{connectionError}</span>
             {!connected && (
               <button onClick={retryConnection} className="block mt-2 text-xs text-red-300 hover:text-red-100 underline">
-                Erneut versuchen
+                Try again
               </button>
             )}
           </div>
@@ -394,15 +396,15 @@ useEffect(() => {
                 <Sparkles className="w-8 h-8 text-yellow-400 absolute -top-2 -right-2 animate-pulse" />
               </div>
             </div>
-            <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">Vertrauen oder Zweifeln</h1>
-            <p className="text-gray-300 text-sm">Das ultimative Vertrauensspiel</p>
+            <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">Trust or Doubt</h1>
+            <p className="text-gray-300 text-sm">The ultimate game of trust</p>
           </div>
           
           <div className="space-y-4">
             {/* Create Game */}
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 hover:bg-white/15 transition-all">
               <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <Users className="text-blue-400" /> Neues Spiel
+                <Users className="text-blue-400" /> New Game
               </h2>
               <div className="space-y-4">
                 <div>
@@ -411,11 +413,11 @@ useEffect(() => {
                     value={playerName}
                     onChange={(e) => setPlayerName(e.target.value)}
                     className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-blue-400 focus:outline-none transition-all"
-                    placeholder="Dein Name (2-15 Zeichen)"
+                    placeholder="Your name (2-15 characters)"
                     maxLength={15}
                   />
                   {playerName && !isValidPlayerName(playerName) && (
-                    <p className="text-red-400 text-xs mt-1">Name muss 2-15 Zeichen haben</p>
+                    <p className="text-red-400 text-xs mt-1">Name must be 2-15 characters</p>
                   )}
                 </div>
                 <button
@@ -423,7 +425,7 @@ useEffect(() => {
                   disabled={!isValidPlayerName(playerName) || !connected}
                   className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-6 rounded-xl hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
                 >
-                  {connected ? 'Spiel erstellen' : 'Verbindung wird hergestellt...'}
+                  {connected ? 'Create Game' : 'Connecting...'}
                 </button>
               </div>
             </div>
@@ -431,7 +433,7 @@ useEffect(() => {
             {/* Join Game */}
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 hover:bg-white/15 transition-all">
               <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <Wifi className="text-green-400" /> Spiel beitreten
+                <Wifi className="text-green-400" /> Join Game
               </h2>
               <div className="space-y-4">
                 <div>
@@ -440,11 +442,11 @@ useEffect(() => {
                     value={playerName}
                     onChange={(e) => setPlayerName(e.target.value)}
                     className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-green-400 focus:outline-none transition-all"
-                    placeholder="Dein Name (2-15 Zeichen)"
+                    placeholder="Your name (2-15 characters)"
                     maxLength={15}
                   />
                   {playerName && !isValidPlayerName(playerName) && (
-                    <p className="text-red-400 text-xs mt-1">Name muss 2-15 Zeichen haben</p>
+                    <p className="text-red-400 text-xs mt-1">Name must be 2-15 characters</p>
                   )}
                 </div>
                 <div>
@@ -453,11 +455,11 @@ useEffect(() => {
                     value={joinGameId}
                     onChange={(e) => setJoinGameId(e.target.value.toUpperCase())}
                     className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-green-400 focus:outline-none transition-all font-mono text-center text-lg"
-                    placeholder="SPIELCODE (6 Zeichen)"
+                    placeholder="GAME CODE (6 characters)"
                     maxLength={6}
                   />
                   {joinGameId && !isValidGameId(joinGameId) && (
-                    <p className="text-red-400 text-xs mt-1">Spielcode muss 6 Zeichen haben</p>
+                    <p className="text-red-400 text-xs mt-1">Game code must be 6 characters</p>
                   )}
                 </div>
                 <button
@@ -465,7 +467,7 @@ useEffect(() => {
                   disabled={!isValidPlayerName(playerName) || !isValidGameId(joinGameId) || !connected}
                   className="w-full bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
                 >
-                  {connected ? 'Beitreten' : 'Verbindung wird hergestellt...'}
+                  {connected ? 'Join' : 'Connecting...'}
                 </button>
               </div>
             </div>
@@ -474,10 +476,10 @@ useEffect(() => {
             {reconnectToken && (
               <div className="bg-yellow-500/10 backdrop-blur-lg rounded-2xl p-6 border border-yellow-500/30">
                 <h2 className="text-lg font-bold text-yellow-400 mb-2 flex items-center gap-2">
-                  <AlertCircle className="w-5 h-5" /> Unterbrochenes Spiel
+                  <AlertCircle className="w-5 h-5" /> Game in Progress
                 </h2>
                 <p className="text-gray-300 text-sm mb-4">
-                  Du warst in einem Spiel. Möchtest du wieder beitreten?
+                  You were in a game. Would you like to rejoin?
                 </p>
                 <div className="flex gap-2">
                   <button
@@ -485,7 +487,7 @@ useEffect(() => {
                     disabled={!connected || reconnecting}
                     className="flex-1 bg-gradient-to-r from-yellow-500 to-orange-600 text-white font-bold py-2 px-4 rounded-xl hover:from-yellow-600 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
-                    {reconnecting ? 'Verbinde...' : 'Wieder beitreten'}
+                    {reconnecting ? 'Connecting...' : 'Rejoin'}
                   </button>
                   <button
                     onClick={() => {
@@ -498,7 +500,7 @@ useEffect(() => {
                     }}
                     className="px-4 py-2 bg-white/20 text-white rounded-xl hover:bg-white/30 transition-all"
                   >
-                    Verwerfen
+                    Dismiss
                   </button>
                 </div>
               </div>
@@ -517,23 +519,23 @@ useEffect(() => {
         {renderErrorNotification()}
         <div className="max-w-md mx-auto pt-8">
           <div className="text-center mb-8 animate-fade-in">
-            <h1 className="text-3xl font-bold text-white mb-2">Warte auf Spieler...</h1>
-            <p className="text-gray-300 text-sm">Teile diesen Code:</p>
+            <h1 className="text-3xl font-bold text-white mb-2">Waiting for players...</h1>
+            <p className="text-gray-300 text-sm">Share this code:</p>
           </div>
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 mb-6 animate-scale-in">
             <div className="text-center">
               <div 
                 className="text-5xl font-mono font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 mb-4 animate-pulse cursor-pointer select-all"
                 onClick={() => navigator.clipboard?.writeText(gameId)}
-                title="Klicken zum Kopieren"
+                title="Click to copy"
               >
                 {gameId}
               </div>
-              <p className="text-gray-300 text-sm">Spielcode (klicken zum kopieren)</p>
+              <p className="text-gray-300 text-sm">Game code (click to copy)</p>
             </div>
           </div>
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6">
-            <h3 className="text-lg font-bold text-white mb-4">Spieler im Raum:</h3>
+            <h3 className="text-lg font-bold text-white mb-4">Players in room:</h3>
             <div className="space-y-2">
               {gameData.players?.map((player, index) => (
                 <div key={index} className="flex items-center gap-3 bg-white/20 rounded-xl p-3 animate-slide-in" style={{animationDelay: `${index * 100}ms`}}>
@@ -550,7 +552,7 @@ useEffect(() => {
               {gameData.players?.length === 1 && (
                 <div className="flex items-center gap-3 bg-white/10 rounded-xl p-3 border-2 border-dashed border-white/30">
                   <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
-                  <span className="text-gray-400">Warte auf zweiten Spieler...</span>
+                  <span className="text-gray-400">Waiting for second player...</span>
                 </div>
               )}
             </div>
@@ -568,25 +570,25 @@ useEffect(() => {
         {renderErrorNotification()}
         <div className="max-w-md mx-auto pt-8">
           <div className="text-center mb-8 animate-fade-in">
-            <h1 className="text-3xl font-bold text-white mb-2">Rollen werden verteilt...</h1>
-            <p className="text-gray-300 text-sm">Das Schicksal entscheidet!</p>
+            <h1 className="text-3xl font-bold text-white mb-2">Assigning Roles...</h1>
+            <p className="text-gray-300 text-sm">Let fate decide!</p>
           </div>
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 space-y-4 animate-scale-in">
             <div className={`bg-gradient-to-r from-blue-500/20 to-blue-600/20 rounded-xl p-4 text-center transform transition-all ${gameData.challengerName ? 'scale-100 opacity-100' : 'scale-95 opacity-50'}`}>
               <div className="flex justify-center mb-2"><Zap className="w-8 h-8 text-blue-400 animate-pulse" /></div>
-              <h3 className="text-lg font-bold text-white mb-1">Herausforderer</h3>
+              <h3 className="text-lg font-bold text-white mb-1">Challenger</h3>
               <p className="text-2xl font-bold text-blue-400">{gameData.challengerName || '...'}</p>
-              <p className="text-gray-300 text-sm mt-2">Beantwortet Fragen & trifft Entscheidungen</p>
+              <p className="text-gray-300 text-sm mt-2">Answers questions & makes decisions</p>
               <div className="mt-3 flex items-center justify-center gap-1">
                 <Coins className="w-4 h-4 text-yellow-400" />
-                <span className="text-yellow-400 font-bold">{gameData.challengerCoins || gameData.initialCoins} Münzen zum Start</span>
+                <span className="text-yellow-400 font-bold">{gameData.challengerCoins || gameData.initialCoins} starting coins</span>
               </div>
             </div>
             <div className={`bg-gradient-to-r from-purple-500/20 to-purple-600/20 rounded-xl p-4 text-center transform transition-all ${gameData.moderatorName ? 'scale-100 opacity-100' : 'scale-95 opacity-50'}`}>
               <div className="flex justify-center mb-2"><Shield className="w-8 h-8 text-purple-400 animate-pulse" /></div>
               <h3 className="text-lg font-bold text-white mb-1">Moderator</h3>
               <p className="text-2xl font-bold text-purple-400">{gameData.moderatorName || '...'}</p>
-              <p className="text-gray-300 text-sm mt-2">Beantwortet Fragen & sammelt Vertrauen</p>
+              <p className="text-gray-300 text-sm mt-2">Answers questions & builds trust</p>
             </div>
             <div className="text-center pt-4">
               {playerRole === 'host' ? (
@@ -595,10 +597,10 @@ useEffect(() => {
                   disabled={!connected || !gameData.challengerName || !gameData.moderatorName}
                   className="bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-8 rounded-xl hover:from-green-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
                 >
-                  {connected ? 'Spiel starten' : 'Verbindung wird hergestellt...'}
+                  {connected ? 'Start Game' : 'Connecting...'}
                 </button>
               ) : (
-                <p className="text-gray-300 animate-pulse">Warte auf den Spielleiter...</p>
+                <p className="text-gray-300 animate-pulse">Waiting for the game host...</p>
               )}
             </div>
           </div>
@@ -614,7 +616,7 @@ useEffect(() => {
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-white mx-auto mb-4"></div>
-          <p className="text-white text-xl">Lade Fragen...</p>
+          <p className="text-white text-xl">Loading questions...</p>
         </div>
       </div>
     );
@@ -626,8 +628,8 @@ useEffect(() => {
         <div className="max-w-2xl mx-auto">
           {/* Header */}
           <div className="text-center mb-4 pt-4">
-            <h1 className="text-2xl font-bold text-white">Vertrauen oder Zweifeln</h1>
-            <p className="text-gray-300 text-sm">Frage {gameData.currentQuestion + 1}</p>
+            <h1 className="text-2xl font-bold text-white">Trust or Doubt</h1>
+            <p className="text-gray-300 text-sm">Question {gameData.currentQuestion + 1}</p>
           </div>
 
           {/* Player Status Cards */}
@@ -694,7 +696,7 @@ useEffect(() => {
                   </button>
                   {(myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered)) && (
                     <div className="mt-3">
-                      <p className="text-gray-400 text-sm animate-pulse">Warte auf die Antwort des anderen Spielers...</p>
+                      <p className="text-gray-400 text-sm animate-pulse">Waiting for the other player's answer...</p>
                       <div className="w-6 h-6 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mx-auto mt-2"></div>
                     </div>
                   )}
@@ -706,7 +708,7 @@ useEffect(() => {
               <div className="text-center animate-fade-in">
                 <div className="mb-4">
                   <div className="bg-white/20 rounded-xl p-4 mb-4">
-                    <p className="text-sm text-gray-300 mb-2">Deine Antwort:</p>
+                    <p className="text-sm text-gray-300 mb-2">Your answer:</p>
                     {(() => {
                       const answerIndex = gameRole === 'challenger' ? parseInt(gameData.challengerAnswer) : parseInt(gameData.moderatorAnswer);
                       const isCorrect = gameRole === 'challenger' ? gameData.challengerCorrect : answerIndex === currentQ.correct;
@@ -715,9 +717,9 @@ useEffect(() => {
                           <p className="text-lg font-bold">{String.fromCharCode(65 + answerIndex)} – {currentQ.options[answerIndex]}</p>
                           <div className="flex justify-center items-center gap-2 mt-2">
                             {isCorrect ? (
-                              <><CheckCircle className="text-green-400 w-5 h-5" /><span className="text-green-400 font-bold">Richtig! +1 Punkt</span></>
+                              <><CheckCircle className="text-green-400 w-5 h-5" /><span className="text-green-400 font-bold">Correct! +1 point</span></>
                             ) : (
-                              <><XCircle className="text-red-400 w-5 h-5" /><span className="text-red-400 font-bold">Falsch!</span></>
+                              <><XCircle className="text-red-400 w-5 h-5" /><span className="text-red-400 font-bold">Incorrect!</span></>
                             )}
                           </div>
                         </>
@@ -727,22 +729,22 @@ useEffect(() => {
                 </div>
                 {gameRole === 'challenger' ? (
                   <div className="animate-scale-in">
-                    <h3 className="text-lg font-bold text-white mb-3">Zeit für deine Entscheidung!</h3>
-                    <p className="text-gray-300 mb-6 text-sm">{gameData.moderatorName} hat auch geantwortet.<br/>Vertraust du oder zweifelst du?</p>
+                    <h3 className="text-lg font-bold text-white mb-3">Time for your decision!</h3>
+                    <p className="text-gray-300 mb-6 text-sm">{gameData.moderatorName} has also answered.<br/>Do you trust or doubt?</p>
                     <div className="flex gap-3 justify-center">
                       <button onClick={() => makeDecision('trust')} disabled={!connected} className="bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2">
-                        <Heart className="w-4 h-4" /> Vertrauen
+                        <Heart className="w-4 h-4" /> Trust
                       </button>
                       <button onClick={() => makeDecision('doubt')} disabled={gameData.challengerCoins <= 0 || !connected} className="bg-gradient-to-r from-red-500 to-pink-600 text-white font-bold py-3 px-6 rounded-xl hover:from-red-600 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2">
-                        <Shield className="w-4 h-4" /> Zweifeln <span className="text-xs bg-white/20 px-2 py-0.5 rounded-full">-1 <Coins className="inline w-3 h-3" /></span>
+                        <Shield className="w-4 h-4" /> Doubt <span className="text-xs bg-white/20 px-2 py-0.5 rounded-full">-1 <Coins className="inline w-3 h-3" /></span>
                       </button>
                     </div>
-                    {gameData.challengerCoins <= 0 && <p className="text-red-400 text-sm mt-3 animate-pulse">Keine Münzen mehr zum Zweifeln!</p>}
+                    {gameData.challengerCoins <= 0 && <p className="text-red-400 text-sm mt-3 animate-pulse">No more coins to doubt with!</p>}
                   </div>
                 ) : (
                   <div className="text-gray-400 animate-pulse">
                     <Shield className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                    <p>Warte auf die Entscheidung von {gameData.challengerName}...</p>
+                    <p>Waiting for {gameData.challengerName}'s decision...</p>
                     <div className="w-6 h-6 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mx-auto mt-2"></div>
                   </div>
                 )}
@@ -756,10 +758,10 @@ useEffect(() => {
                     {gameData.decision === 'trust' ? <Heart className="w-16 h-16 text-green-400 mx-auto" /> : <Shield className="w-16 h-16 text-red-400 mx-auto" />}
                   </div>
                 )}
-                <h3 className="text-xl font-bold text-white mb-4">Rundenergebnis</h3>
+                <h3 className="text-xl font-bold text-white mb-4">Round Result</h3>
                 <div className="bg-white/20 rounded-xl p-4 mb-4 space-y-3">
                   <div>
-                    <p className="text-sm text-gray-300">Herausforderer:</p>
+                    <p className="text-sm text-gray-300">Challenger:</p>
                     <p className="font-bold">{String.fromCharCode(65 + parseInt(gameData.challengerAnswer))} - {currentQ.options[parseInt(gameData.challengerAnswer)]} {gameData.challengerCorrect ? <CheckCircle className="inline ml-2 text-green-400 w-4 h-4" /> : <XCircle className="inline ml-2 text-red-400 w-4 h-4" />}</p>
                   </div>
                   {gameData.showModeratorAnswer && (
@@ -769,7 +771,7 @@ useEffect(() => {
                     </div>
                   )}
                   <div className="pt-3 border-t border-white/30">
-                    <p className="text-sm text-gray-300">Richtige Antwort:</p>
+                    <p className="text-sm text-gray-300">Correct answer:</p>
                     <p className="text-lg text-green-400 font-bold">{String.fromCharCode(65 + currentQ.correct)} - {currentQ.options[currentQ.correct]}</p>
                   </div>
                 </div>
@@ -806,14 +808,14 @@ useEffect(() => {
         <div className="max-w-md mx-auto pt-8">
           <div className="text-center mb-8 animate-fade-in">
             <Trophy className="text-yellow-400 w-20 h-20 mx-auto mb-4 animate-bounce" />
-            <h1 className="text-3xl font-bold text-white mb-2">Spiel beendet!</h1>
+            <h1 className="text-3xl font-bold text-white mb-2">Game Over!</h1>
           </div>
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 text-center animate-scale-in">
             <h2 className="text-2xl font-bold text-white mb-6">
               {gameData.winner === 'Unentschieden' ? (
-                <span className="text-gray-400">Unentschieden!</span>
+                <span className="text-gray-400">It's a draw!</span>
               ) : (
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-400">{gameData.winner} gewinnt!</span>
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-400">{gameData.winner} wins!</span>
               )}
             </h2>
             <div className="grid grid-cols-2 gap-4 mb-6">
@@ -890,15 +892,15 @@ useEffect(() => {
         <div className="max-w-md mx-auto text-center">
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8">
             <AlertCircle className="w-16 h-16 text-yellow-400 mx-auto mb-4 animate-pulse" />
-            <h2 className="text-2xl font-bold text-white mb-4">Spiel pausiert</h2>
-            <p className="text-gray-300 mb-6">{connectionError || 'Verbindungsprobleme erkannt'}</p>
+            <h2 className="text-2xl font-bold text-white mb-4">Game Paused</h2>
+            <p className="text-gray-300 mb-6">{connectionError || 'Connection issues detected'}</p>
             <div className="space-y-3">
               <button
                 onClick={retryConnection}
                 disabled={reconnecting}
                 className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-6 rounded-xl hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
-                {reconnecting ? 'Verbinde...' : 'Neu verbinden'}
+                {reconnecting ? 'Connecting...' : 'Reconnect'}
               </button>
               <button
                 onClick={() => {
@@ -907,7 +909,7 @@ useEffect(() => {
                 }}
                 className="w-full bg-white/20 text-white font-bold py-2 px-6 rounded-xl hover:bg-white/30 transition-all"
               >
-                Zum Hauptmenü
+                Back to Main Menu
               </button>
             </div>
           </div>
@@ -922,7 +924,7 @@ useEffect(() => {
       {renderConnectionStatus()}
       <div className="text-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-white mx-auto mb-4"></div>
-        <p className="text-white text-xl">Verbindung wird hergestellt...</p>
+        <p className="text-white text-xl">Connecting to server...</p>
       </div>
     </div>
   );

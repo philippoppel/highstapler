@@ -387,19 +387,15 @@ class GameManager {
 class QuestionService {
   constructor() {
     this.groqApiKey = process.env.GROQ_API_KEY;
-    this.deeplApiKey = process.env.DEEPL_API_KEY;
     
     // Caches
     this.questionCache = [];
-    this.translationCache = new Map();
     this.usedQuestions = new Set();
     this.sessionToken = null;
     
     // Rate limiting
     this.groqRequestCount = 0;
     this.groqResetTime = Date.now() + 60000; // 1 Minute
-    this.deeplRequestCount = 0;
-    this.deeplResetTime = Date.now() + 60000;
     
     // Statistiken
     this.stats = {
@@ -407,7 +403,6 @@ class QuestionService {
       fromGroq: 0,
       fromTriviaAPI: 0,
       fromLocal: 0,
-      translations: 0,
       cacheHits: 0,
       errors: 0
     };
@@ -477,7 +472,7 @@ class QuestionService {
     }
     
     // Fülle Cache mit zusätzlichen Fragen auf
-    if (this.questionCache.length < 20) {
+    if (this.questionCache.length < 50) {
       this.prefillCache();
     }
     
@@ -493,26 +488,15 @@ class QuestionService {
     return this.groqRequestCount < 30; // 30 Anfragen pro Minute
   }
 
-  canMakeDeeplRequest() {
-    const now = Date.now();
-    if (now > this.deeplResetTime) {
-      this.deeplRequestCount = 0;
-      this.deeplResetTime = now + 60000;
-    }
-    return this.deeplRequestCount < 10; // 10 Anfragen pro Minute
-  }
-
   async prefillCache() {
-    // Asynchron Cache auffüllen
-    setTimeout(async () => {
+    if (this.questionCache.length < 50 && this.canMakeGroqRequest()) {
       try {
-        const questions = await this.generateWithGroq(10);
-        this.questionCache.push(...questions);
-        console.log(`${questions.length} Fragen in Cache vorgefüllt`);
+        const newQuestions = await this.generateWithGroq(10);
+        this.questionCache = [...this.questionCache, ...newQuestions];
       } catch (error) {
-        console.error('Cache Prefill Fehler:', error);
+        console.error('Fehler beim Vorausfüllen des Caches:', error);
       }
-    }, 1000);
+    }
   }
 
   async generateWithGroq(count) {
@@ -521,28 +505,28 @@ class QuestionService {
     this.groqRequestCount++;
     
     try {
-      const categories = ['Geografie', 'Geschichte', 'Wissenschaft', 'Kultur', 'Sport', 'Allgemeinwissen'];
+      const categories = ['Geography', 'History', 'Science', 'Culture', 'Sports', 'General Knowledge'];
       const selectedCategory = categories[Math.floor(Math.random() * categories.length)];
       
-      const prompt = `Generiere ${count} hochwertige deutsche Multiple-Choice Quizfragen für die Kategorie "${selectedCategory}".
+      const prompt = `Generate ${count} high-quality English multiple-choice quiz questions for the category "${selectedCategory}".
 
-WICHTIGE ANFORDERUNGEN:
-1. Die Fragen müssen faktisch 100% korrekt sein (Stand 2024)
-2. Genau EINE richtige Antwort pro Frage
-3. Drei plausible aber definitiv falsche Alternativen
-4. Fragen sollen interessant und lehrreich sein
-5. Verschiedene Schwierigkeitsgrade
-6. Vermeide zu schwierige oder obskure Fragen
+IMPORTANT REQUIREMENTS:
+1. The questions must be factually 100% correct (as of 2024)
+2. Exactly ONE correct answer per question
+3. Three plausible but definitely incorrect alternatives
+4. Questions should be interesting and educational
+5. Various difficulty levels
+6. Avoid very difficult or obscure questions
 
-Antworte NUR mit validem JSON in diesem Format:
+Answer ONLY with valid JSON in this format:
 {
   "questions": [
     {
-      "question": "Die Frage hier",
+      "question": "The question here",
       "options": ["Option A", "Option B", "Option C", "Option D"],
       "correct": 0,
       "category": "${selectedCategory}",
-      "difficulty": "mittel"
+      "difficulty": "medium"
     }
   ]
 }`;
@@ -552,7 +536,7 @@ Antworte NUR mit validem JSON in diesem Format:
         messages: [
           {
             role: 'system',
-            content: 'Du bist ein Experte für Quizfragen. Antworte immer nur mit validem JSON ohne zusätzlichen Text.'
+            content: 'You are an expert in quiz questions. Always answer with valid JSON only.'
           },
           {
             role: 'user',
@@ -640,20 +624,13 @@ Antworte NUR mit validem JSON in diesem Format:
             Buffer.from(a, 'base64').toString('utf-8')
           );
           
-          // Übersetze ins Deutsche
-          const translatedQ = await this.translateText(question);
-          const translatedCorrect = await this.translateText(correctAnswer);
-          const translatedIncorrect = await Promise.all(
-            incorrectAnswers.map(a => this.translateText(a))
-          );
-          
           // Mische Antworten
-          const allOptions = [...translatedIncorrect, translatedCorrect];
+          const allOptions = [...incorrectAnswers, correctAnswer];
           const shuffled = this.shuffle(allOptions);
-          const correctIndex = shuffled.indexOf(translatedCorrect);
+          const correctIndex = shuffled.indexOf(correctAnswer);
           
           questions.push({
-            question: translatedQ,
+            question: question,
             options: shuffled,
             correct: correctIndex,
             category: this.mapCategory(q.category),
@@ -676,62 +653,6 @@ Antworte NUR mit validem JSON in diesem Format:
       this.stats.errors++;
       return [];
     }
-  }
-
-  async translateText(text) {
-    // Cache check
-    if (this.translationCache.has(text)) {
-      return this.translationCache.get(text);
-    }
-    
-    // Einfache Übersetzungen
-    const simpleTranslations = {
-      'True': 'Richtig',
-      'False': 'Falsch',
-      'Yes': 'Ja',
-      'No': 'Nein',
-      'North': 'Nord',
-      'South': 'Süd',
-      'East': 'Ost',
-      'West': 'West',
-      'All of the above': 'Alle genannten',
-      'None of the above': 'Keine der genannten'
-    };
-    
-    if (simpleTranslations[text]) {
-      this.translationCache.set(text, simpleTranslations[text]);
-      return simpleTranslations[text];
-    }
-    
-    // DeepL Übersetzung (mit Rate Limiting)
-    if (this.deeplApiKey && this.canMakeDeeplRequest()) {
-      try {
-        this.deeplRequestCount++;
-        
-        const response = await axios.post('https://api-free.deepl.com/v2/translate', {
-          text: [text],
-          target_lang: 'DE'
-        }, {
-          headers: {
-            'Authorization': `DeepL-Auth-Key ${this.deeplApiKey}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 10000
-        });
-        
-        const translated = response.data.translations[0].text;
-        this.translationCache.set(text, translated);
-        this.stats.translations++;
-        return translated;
-        
-      } catch (error) {
-        console.error('DeepL Übersetzungsfehler:', error);
-      }
-    }
-    
-    // Fallback: Original zurückgeben
-    this.translationCache.set(text, text);
-    return text;
   }
 
   getLocalQuestions(count) {
@@ -776,25 +697,25 @@ Antworte NUR mit validem JSON in diesem Format:
 
   mapCategory(apiCategory) {
     const mapping = {
-      'Geography': 'Geografie',
-      'History': 'Geschichte',
-      'Science': 'Wissenschaft',
-      'Science & Nature': 'Wissenschaft',
-      'Sports': 'Sport',
-      'Entertainment': 'Kultur',
-      'Art': 'Kultur',
-      'General Knowledge': 'Allgemeinwissen',
-      'Mythology': 'Geschichte',
-      'Politics': 'Geschichte',
-      'Celebrities': 'Kultur',
-      'Animals': 'Wissenschaft'
+      'Geography': 'Geography',
+      'History': 'History',
+      'Science': 'Science',
+      'Science & Nature': 'Science',
+      'Sports': 'Sports',
+      'Entertainment': 'Culture',
+      'Art': 'Culture',
+      'General Knowledge': 'General Knowledge',
+      'Mythology': 'History',
+      'Politics': 'History',
+      'Celebrities': 'Culture',
+      'Animals': 'Science'
     };
     
-    return mapping[apiCategory] || 'Allgemeinwissen';
+    return mapping[apiCategory] || 'General Knowledge';
   }
 
   hashQuestion(question) {
-    return crypto.createHash('md5').update(question.toLowerCase().replace(/[^a-z0-9äöüß]/g, '')).digest('hex');
+    return crypto.createHash('md5').update(question.toLowerCase().replace(/[^a-z0-9]/g, '')).digest('hex');
   }
 
   shuffle(array) {
@@ -810,16 +731,9 @@ Antworte NUR mit validem JSON in diesem Format:
     return {
       ...this.stats,
       cacheSize: this.questionCache.length,
-      translationCacheSize: this.translationCache.size,
-      usedQuestionsCount: this.usedQuestions.size,
-      groqRateLimit: {
-        requests: this.groqRequestCount,
-        resetTime: new Date(this.groqResetTime).toISOString()
-      },
-      deeplRateLimit: {
-        requests: this.deeplRequestCount,
-        resetTime: new Date(this.deeplResetTime).toISOString()
-      }
+      usedQuestions: this.usedQuestions.size,
+      groqRequests: this.groqRequestCount,
+      groqResetIn: Math.max(0, Math.ceil((this.groqResetTime - Date.now()) / 1000))
     };
   }
 
