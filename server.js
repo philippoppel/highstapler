@@ -931,7 +931,7 @@ socket.on('create-game', async (data) => {
       const gameSettings = data.settings || {};
 
       // Fordere zuerst die Fragen an, BEVOR das Spiel final erstellt wird.
-      const questions = await questionService.getQuestions(30, null, gameSettings);
+      const questions = await questionService.getQuestions(10, null, gameSettings);
 
       // PRÜFUNG: Wenn eine spezielle Kategorie gewünscht war, aber keine Fragen dafür gefunden wurden.
       // Wir prüfen, ob die erste Frage eine andere Kategorie hat als die gewünschte.
