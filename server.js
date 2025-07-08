@@ -427,66 +427,94 @@ class QuestionService {
     }
   }
 
-  async getQuestions(count = 10, gameId = null, settings = {}) {
-    const { difficulty = 'medium', category = null } = settings;
-    
-    console.log(`Generiere ${count} Fragen für Spiel ${gameId} - Difficulty: ${difficulty}, Category: ${category || 'General'}`);
-    
-    let questions = [];
-    
-    // Prüfe Cache zuerst
-    if (this.questionCache.length > 0) {
-      const fromCache = this.questionCache.splice(0, Math.min(count, this.questionCache.length));
+// ============== KOPIEREN SIE AB HIER ================
+
+async getQuestions(count = 10, gameId = null, settings = {}) {
+  const { difficulty = 'medium', category = null } = settings;
+  
+  console.log(`Anfrage für ${count} Fragen - Kategorie: ${category || 'Allgemein'}, Schwierigkeit: ${difficulty}`);
+  
+  let questions = [];
+  
+  // --- NEUE, VERBESSERTE CACHE-LOGIK ---
+  if (this.questionCache.length > 0) {
+      let fromCache = [];
+      
+      if (category) {
+          // 1. Finde alle Fragen, die zur angeforderten Kategorie passen
+          const matchingQuestions = this.questionCache.filter(q => q.category && q.category.toLowerCase() === category.toLowerCase());
+          
+          // 2. Nimm so viele wie benötigt, aber maximal so viele wie vorhanden
+          fromCache = matchingQuestions.slice(0, count);
+          
+          if (fromCache.length > 0) {
+              console.log(`${fromCache.length} passende Fragen für Kategorie "${category}" aus dem Cache gefunden.`);
+              // 3. Entferne die genommenen Fragen aus dem Haupt-Cache anhand ihrer eindeutigen ID
+              const usedIds = new Set(fromCache.map(q => q.id));
+              this.questionCache = this.questionCache.filter(q => !usedIds.has(q.id));
+          }
+      } else {
+          // Alte Logik, wenn keine spezifische Kategorie gebraucht wird (schneller Zugriff)
+          fromCache = this.questionCache.splice(0, count);
+          console.log(`${fromCache.length} generische Fragen aus dem Cache genommen.`);
+      }
+      
       questions.push(...fromCache);
       this.stats.cacheHits += fromCache.length;
-      console.log(`${fromCache.length} questions used from cache`);
-    }
-    
-    const remaining = count - questions.length;
-    if (remaining <= 0) {
-      return this.deduplicateQuestions(questions, gameId);
-    }
-    
-    // Versuche Groq AI mit Settings
-    if (this.groqApiKey && this.canMakeGroqRequest()) {
-      try {
-        const groqQuestions = await this.generateWithGroq(Math.ceil(remaining * 0.7), difficulty, category);
-        questions.push(...groqQuestions);
-        console.log(`${groqQuestions.length} Fragen von Groq generiert`);
-      } catch (error) {
-        console.error('Groq Fehler:', error);
-        this.stats.errors++;
-      }
-    }
-    
-    // Fülle mit Trivia API auf
-    const stillNeeded = count - questions.length;
-    if (stillNeeded > 0) {
-      try {
-        const triviaQuestions = await this.fetchFromTriviaAPI(stillNeeded);
-        questions.push(...triviaQuestions);
-        console.log(`${triviaQuestions.length} Fragen von Trivia API geholt`);
-      } catch (error) {
-        console.error('Trivia API Fehler:', error);
-        this.stats.errors++;
-      }
-    }
-    
-    // Fallback auf lokale Fragen
-    const finallyNeeded = count - questions.length;
-    if (finallyNeeded > 0) {
-      const localQuestions = this.getLocalQuestions(finallyNeeded);
-      questions.push(...localQuestions);
-      console.log(`${localQuestions.length} lokale Fragen verwendet`);
-    }
-    
-    // Fülle Cache mit zusätzlichen Fragen auf
-    if (this.questionCache.length < 50) {
-      this.prefillCache();
-    }
-    
-    return this.deduplicateQuestions(questions, gameId).slice(0, count);
   }
+
+  const remaining = count - questions.length;
+
+  if (remaining > 0) {
+      console.log(`${remaining} Fragen werden neu von APIs angefordert...`);
+      
+      // Versuche Groq zuerst, da es spezifische Kategorien am besten bedienen kann
+      if (this.groqApiKey && this.canMakeGroqRequest()) {
+          try {
+              // Fordere etwas mehr an, um eventuelle Duplikate auszugleichen
+              const groqQuestions = await this.generateWithGroq(Math.ceil(remaining * 1.2), difficulty, category);
+              questions.push(...groqQuestions);
+              console.log(`${groqQuestions.length} Fragen von Groq generiert`);
+          } catch (error) {
+              console.error('Groq Fehler:', error);
+              this.stats.errors++;
+          }
+      }
+      
+      // Fülle den Rest mit der Trivia API auf
+      const stillNeeded = count - questions.length;
+      if (stillNeeded > 0) {
+          try {
+              // Die Trivia API unterstützt keine benutzerdefinierten Kategorien, dient also als allgemeiner Fallback
+              const triviaQuestions = await this.fetchFromTriviaAPI(stillNeeded);
+              questions.push(...triviaQuestions);
+              console.log(`${triviaQuestions.length} Fragen von Trivia API geholt`);
+          } catch (error) {
+              console.error('Trivia API Fehler:', error);
+              this.stats.errors++;
+          }
+      }
+      
+      // Letzter Fallback auf die lokale Datenbank
+      const finallyNeeded = count - questions.length;
+      if (finallyNeeded > 0) {
+          const localQuestions = this.getLocalQuestions(finallyNeeded);
+          questions.push(...localQuestions);
+          console.log(`${localQuestions.length} lokale Fragen verwendet`);
+      }
+  }
+  
+  // Fülle den Cache im Hintergrund für zukünftige Anfragen auf
+  if (this.questionCache.length < 50) {
+      this.prefillCache();
+  }
+  
+  const finalQuestions = this.deduplicateQuestions(questions, gameId).slice(0, count);
+  console.log(`Anfrage abgeschlossen. ${finalQuestions.length} finale Fragen werden zurückgegeben.`);
+  return finalQuestions;
+}
+
+// ============== KOPIEREN SIE BIS HIER ================
 
   canMakeGroqRequest() {
     const now = Date.now();
