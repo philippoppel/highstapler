@@ -62,11 +62,16 @@ const QuizGame = () => {
     localStorage.removeItem('reconnectToken');
     localStorage.removeItem('gameId');
     localStorage.removeItem('playerName');
+    localStorage.removeItem('tokenTimestamp');
     setSessionId('');
     setReconnectToken('');
     setGameId('');
     setPlayerRole('');
     setGameRole('');
+    setGameState('menu');
+    setGameData({});
+    setMyAnswer('');
+    setMyAnswered(false);
   };
 
   // Initialize socket connection and set up event listeners
@@ -86,7 +91,7 @@ const QuizGame = () => {
     };
     
     // Only set reconnectToken if it really exists and is valid
-    if (reconnectToken) {
+    if (reconnectToken && gameState !== 'menu' && gameState !== 'finished') {
       socketOptions.auth.reconnectToken = reconnectToken;
     }
 
@@ -140,6 +145,7 @@ const QuizGame = () => {
       if (data.reconnectToken) {
         setReconnectToken(data.reconnectToken);
         localStorage.setItem('reconnectToken', data.reconnectToken);
+        localStorage.setItem('tokenTimestamp', Date.now().toString()); // NEU
       }
       
       localStorage.setItem('gameId', data.gameId);
@@ -159,6 +165,7 @@ const QuizGame = () => {
       if (data.reconnectToken) {
         setReconnectToken(data.reconnectToken);
         localStorage.setItem('reconnectToken', data.reconnectToken);
+        localStorage.setItem('tokenTimestamp', Date.now().toString()); // NEU
       }
       
       localStorage.setItem('gameId', data.gameId);
@@ -245,7 +252,7 @@ const QuizGame = () => {
       setConnectionError(data.message || 'An error occurred');
     });
 
-  }, []); // Keine Dependencies!
+  }, [reconnectToken, gameState]);
 
   // Attempt reconnection with token
   const attemptReconnect = useCallback(() => {
@@ -261,20 +268,24 @@ useEffect(() => {
   const savedGameId = localStorage.getItem('gameId');
   const savedPlayerName = localStorage.getItem('playerName');
   const savedReconnectToken = localStorage.getItem('reconnectToken');
+  const savedTimestamp = localStorage.getItem('tokenTimestamp');
   
-  // Only reconnect if ALL data is present AND no active game is running
-  if (savedGameId && savedPlayerName && savedReconnectToken && !gameId && gameState === 'menu') {
-    setPlayerName(savedPlayerName);
-    setJoinGameId(savedGameId);
-    setReconnectToken(savedReconnectToken);
-    // Automatisch reconnect versuchen
-    setTimeout(() => {
-      if (socketRef.current?.connected) {
-        attemptReconnect();
-      }
-    }, 500);
+  if (savedGameId && savedPlayerName && savedReconnectToken && gameState === 'menu') {
+    const tokenAge = Date.now() - (parseInt(savedTimestamp) || 0);
+    if (tokenAge < 30 * 60 * 1000) { // 30 Minuten
+      setPlayerName(savedPlayerName);
+      setJoinGameId(savedGameId);
+      setReconnectToken(savedReconnectToken);
+      setTimeout(() => {
+        if (socketRef.current?.connected) {
+          attemptReconnect();
+        }
+      }, 500);
+    } else {
+      clearAllSessionData();
+    }
   }
-}, []); // Leere dependency array!
+}, []);
 
   // Initialize socket on mount
   useEffect(() => {
@@ -843,24 +854,19 @@ useEffect(() => {
               </div>
             )}
             <div className="space-y-3">
-              <button
-                onClick={() => {
-                  localStorage.clear();
-                  setGameState('menu');
-                  setGameData({});
-                  setPlayerName('');
-                  setJoinGameId('');
-                  setGameRole('');
-                  setPlayerRole('');
-                  setMyAnswer('');
-                  setMyAnswered(false);
-                  if (socketRef.current) socketRef.current.disconnect();
-                  setTimeout(initializeSocket, 500);
-                }}
-                className="w-full bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 transition-all transform hover:scale-105 active:scale-95"
-              >
-                New Game
-              </button>
+            <button
+              onClick={() => {
+                clearAllSessionData();
+                if (socketRef.current) {
+                  socketRef.current.disconnect();
+                  socketRef.current = null;
+                }
+                window.location.reload();
+              }}
+              className="w-full bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 transition-all transform hover:scale-105 active:scale-95"
+            >
+              New Game
+            </button>
               <button
                 onClick={() => {
                   if (navigator.share) {

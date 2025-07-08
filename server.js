@@ -145,12 +145,13 @@ class SessionManager {
 
   cleanup() {
     const now = Date.now();
-    const maxAge = 30 * 60 * 1000; // 30 Minuten statt 2 Stunden
-    const maxDisconnectedAge = 5 * 60 * 1000; // 5 Minuten statt 30
+    const maxAge = 30 * 60 * 1000; // 30 Minuten
+    const maxDisconnectedAge = 5 * 60 * 1000; // 5 Minuten
     
-    // Also delete sessions of finished games immediately
     for (const [sessionId, session] of this.sessions.entries()) {
       const game = gameManager.getGame(session.gameId);
+      
+      // Session löschen wenn Spiel beendet oder nicht mehr existiert
       if (!game || game.state === 'finished') {
         this.deleteSession(sessionId);
         continue;
@@ -1153,7 +1154,7 @@ io.on('connection', (socket) => {
         
         if (moderatorCorrect) {
           updates.moderatorScore = game.moderatorScore + 1;
-          roundResult = `${game.challengerName} dares. ${game.moderatorName} was right and gets 1 point.`;
+          roundResult = `${game.challengerName} doubts. ${game.moderatorName} was right and gets 1 point.`;
         } else {
           updates.challengerCoins = game.challengerCoins; // Korrektur: Münze bleibt
           roundResult = `${game.challengerName} doubts. ${game.moderatorName} was wrong. Coin stays.`;
@@ -1244,9 +1245,17 @@ io.on('connection', (socket) => {
     try {
       const session = sessionManager.findSessionBySocket(socket.id);
       if (session) {
+        const game = gameManager.getGame(session.gameId);
+        
+        // Wenn Spiel bereits beendet, Session sofort löschen
+        if (!game || game.state === 'finished') {
+          sessionManager.deleteSession(session.id);
+          return;
+        }
+        
+        // Ansonsten normale Disconnect-Logik
         sessionManager.disconnectSession(session.id);
         
-        const game = gameManager.getGame(session.gameId);
         if (game) {
           const disconnectedPlayer = game.players.find(p => p.id === socket.id);
           
@@ -1256,13 +1265,11 @@ io.on('connection', (socket) => {
             
             gameManager.updateGame(session.gameId, {});
             
-            // Benachrichtige andere Spieler nur wenn das Spiel läuft
             if (game.state === 'playing') {
               socket.to(session.gameId).emit('player-disconnected', {
                 playerName: disconnectedPlayer.name
               });
               
-              // Pausiere das Spiel
               gameManager.updateGame(session.gameId, { state: 'paused' });
               io.to(session.gameId).emit('game-paused', game);
             }
