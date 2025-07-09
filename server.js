@@ -579,25 +579,60 @@ async generateWithGroq(count, difficulty = 'medium', customCategory = null) {
       // --- NEUER, INTELLIGENTERER PROMPT ---
       const prompt = `Generate ${count} high-quality English multiple-choice quiz questions ${categoryPrompt}.
 
-IMPORTANT INSTRUCTIONS:
-1.  The questions should be based on the established canon or lore of the topic. For fictional topics like cartoons, "correct" means true within the show's universe.
-2.  Provide exactly ONE correct answer and THREE plausible but incorrect alternatives.
-3.  The difficulty must be: ${difficultyMap[difficulty]}.
-4.  The "category" field in the JSON response MUST EXACTLY match the topic of the generated questions.
-5.  **CRITICAL FALLBACK:** If you absolutely cannot generate questions for the specific topic "${selectedCategory}", do NOT invent nonsense. Instead, generate questions for a broader, related category (e.g., for "SpongeBob", a good fallback is "90s Cartoons" or "Pop Culture"). If you use a fallback, you MUST update the "category" field in the JSON to reflect the new, broader category.
-
-Respond ONLY with a valid JSON object in this exact format:
-{
-"questions": [
-  {
-    "question": "The question text",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correct": 0,
-    "category": "${selectedCategory}",
-    "difficulty": "${difficulty}"
-  }
-]
-}`;
+      DIFFICULTY GUIDELINES:
+      - EASY: Basic facts that casual fans would know. Example: "What color is SpongeBob?" or "What is the capital of France?"
+      - MEDIUM: Requires decent knowledge but not expertise. Example: "In which episode did SpongeBob first meet Sandy?" or "Which river flows through London?"
+      - HARD: Deep knowledge required, specific details. Example: "What is the name of Plankton's computer wife?" or "What year was the Treaty of Westphalia signed?"
+      
+      EXAMPLE OF GOOD QUESTIONS:
+      
+      Easy question:
+      {
+        "question": "What is Spider-Man's real name?",
+        "options": ["Peter Parker", "Bruce Wayne", "Clark Kent", "Tony Stark"],
+        "correct": 0,
+        "category": "Marvel",
+        "difficulty": "easy"
+      }
+      
+      Medium question:
+      {
+        "question": "Which infinity stone was hidden on Vormir?",
+        "options": ["Power Stone", "Time Stone", "Soul Stone", "Reality Stone"],
+        "correct": 2,
+        "category": "Marvel",
+        "difficulty": "medium"
+      }
+      
+      Hard question:
+      {
+        "question": "In the comics, what is the name of Thor's enchanted axe before he gets Mjolnir?",
+        "options": ["Stormbreaker", "Jarnbjorn", "Gungnir", "Hofund"],
+        "correct": 1,
+        "category": "Marvel",
+        "difficulty": "hard"
+      }
+      
+      RULES:
+      1. Questions MUST be factually correct within the topic's universe/reality
+      2. Wrong options should be plausible but clearly incorrect
+      3. Difficulty MUST match: ${difficultyMap[difficulty]}
+      4. If you cannot generate questions for "${selectedCategory}", respond with: {"error": "unknown_category"}
+      5. NEVER make up facts. Only use information you're certain about
+      
+      Respond ONLY with valid JSON:
+      {
+        "questions": [
+          {
+            "question": "Question text here",
+            "options": ["Option A", "Option B", "Option C", "Option D"],
+            "correct": 0,
+            "category": "${selectedCategory}",
+            "difficulty": "${difficulty}",
+            "confidence": 0.95
+          }
+        ]
+      }`;
 
       const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
           model: 'llama3-8b-8192',
@@ -631,22 +666,43 @@ Respond ONLY with a valid JSON object in this exact format:
               throw parseError;
           }
       }
+
+      // Check for unknown category error
+      if (parsed.error === 'unknown_category') {
+        console.log(`Groq doesn't know category: ${selectedCategory}`);
+        return [];
+      }
       
       if (!parsed.questions || parsed.questions.length === 0) {
           console.log(`Groq returned no questions for category: ${selectedCategory}`);
           return [];
       }
 
-      const questions = parsed.questions.map(q => ({
-          ...q,
-          source: 'groq',
-          correct: parseInt(q.correct),
-          id: crypto.randomUUID()
-      }));
+      const questions = parsed.questions
+      .filter(q => !q.confidence || q.confidence >= 0.7) // Filter low confidence
+      .map(q => {
+          const cleaned = {
+              question: q.question,
+              options: q.options,
+              correct: parseInt(q.correct),
+              category: q.category,
+              difficulty: q.difficulty,
+              source: 'groq',
+              id: crypto.randomUUID()
+          };
+          // Remove confidence from final object
+          return cleaned;
+      });
       
       this.stats.fromGroq += questions.length;
       this.stats.totalGenerated += questions.length;
-      return questions;
+      
+      // Synchrone Validierung zuerst
+      const preValidated = this.validateGeneratedQuestions(questions);
+      // Dann asynchrone Quality Checks
+      const validated = validateQuestions(preValidated);
+      scheduleDeepChecks(validated);
+      return validated;
       
   } catch (error) {
       console.error('Groq generation error:', error.response?.data || error.message);
@@ -763,6 +819,40 @@ async fetchFromTriviaAPI(count, difficulty = 'medium') { // <--- HIER WURDE diff
       id: crypto.randomUUID()
     }));
   }
+
+  validateGeneratedQuestions(questions) {
+    const validated = [];
+    for (const q of questions) {
+        // Check 1: Correct index must be valid
+        if (q.correct < 0 || q.correct >= q.options.length) {
+            console.warn(`Invalid correct index: ${q.correct} for question: ${q.question}`);
+            continue;
+        }
+        
+        // Check 2: No duplicate options
+        const uniqueOptions = new Set(q.options);
+        if (uniqueOptions.size !== q.options.length) {
+            console.warn(`Duplicate options in question: ${q.question}`);
+            continue;
+        }
+        
+        // Check 3: Question length sanity check
+        if (q.question.length < 10 || q.question.length > 300) {
+            console.warn(`Question too short/long: ${q.question}`);
+            continue;
+        }
+        
+        // Check 4: Options length sanity check
+        const invalidOption = q.options.find(opt => opt.length < 1 || opt.length > 100);
+        if (invalidOption) {
+            console.warn(`Invalid option length in question: ${q.question}`);
+            continue;
+        }
+        
+        validated.push(q);
+    }
+    return validated;
+}
 
   deduplicateQuestions(questions, gameId) {
     const unique = [];
@@ -1003,6 +1093,14 @@ socket.on('create-game', async (data) => {
           });
           console.log(`Failed to create game with category: ${gameSettings.category}. No matching questions found.`);
           return; // Breche die Spielerstellung ab.
+      }
+      // Additional check: Ensure we have enough questions
+      if (questions.length < 5) {
+        socket.emit('error', { 
+            message: `Nicht genügend Fragen gefunden. Bitte versuche es erneut oder wähle eine andere Kategorie.` 
+        });
+        console.log(`Not enough questions generated: ${questions.length}`);
+        return;
       }
 
       // Wenn alles gut ging, fahre mit der Spielerstellung fort.
