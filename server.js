@@ -4,6 +4,7 @@ const socketIO = require('socket.io');
 const cors = require('cors');
 const axios = require('axios');
 const crypto = require('crypto');
+const { validateQuestions, scheduleDeepChecks } = require('./qualityChecks');
 require('dotenv').config();
 
 const app = express();
@@ -728,8 +729,9 @@ async fetchFromTriviaAPI(count, difficulty = 'medium') { // <--- HIER WURDE diff
     
     this.stats.fromTriviaAPI += questions.length;
     this.stats.totalGenerated += questions.length;
-    return questions;
-    
+    const cleaned = validateQuestions(questions);
+    scheduleDeepChecks(cleaned);   // läuft asynchron
+    return cleaned;    
   } catch (error) {
     console.error('Trivia API Fehler:', error);
     this.stats.errors++;
@@ -770,6 +772,7 @@ async fetchFromTriviaAPI(count, difficulty = 'medium') { // <--- HIER WURDE diff
       const hash = this.hashQuestion(q.question);
       
       if (!seen.has(hash) && !this.usedQuestions.has(hash)) {
+        if (q.reported) continue;  
         unique.push(q);
         seen.add(hash);
         this.usedQuestions.add(hash);
