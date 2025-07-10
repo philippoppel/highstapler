@@ -1579,6 +1579,7 @@ socket.on('choose-role', (data) => {
 });
 
 // Post-Answer Report Request
+// Post-Answer Report Request
 socket.on('request-post-answer-report', (data) => {
   try {
     console.log('POST-ANSWER REPORT REQUEST:', data);
@@ -1592,7 +1593,7 @@ socket.on('request-post-answer-report', (data) => {
     const player = game.players.find(p => p.id === socket.id);
     if (!player) return;
     
-    // Check if player already requested report
+    // Verhindert doppelte Meldungen
     if (game.postAnswerReportRequests.includes(socket.id)) {
       return;
     }
@@ -1600,39 +1601,55 @@ socket.on('request-post-answer-report', (data) => {
     game.postAnswerReportRequests.push(socket.id);
     game.postAnswerReportRequestedBy = player.name;
     
-    // Notify other player
+    // Benachrichtige den anderen Spieler über die Meldung
     socket.to(gameId).emit('post-answer-report-requested', { 
       playerName: player.name,
       reason 
     });
     
-    // If both players want to report, invalidate the question
+    // **START DER KORREKTUR**
+    // Wenn beide Spieler die Frage melden
     if (game.postAnswerReportRequests.length === 2) {
       console.log('Both players agreed to invalidate question - 0 points for all');
       
-      // Mark question as invalid
       const currentQ = game.questions[game.currentQuestion];
       if (currentQ) {
         currentQ.reported = true;
         currentQ.reportReason = 'Invalid question - both players agreed';
       }
-      
-      // Reset scores to what they were before this question
-      // No points awarded to anyone
-      gameManager.updateGame(gameId, {
+
+      const updates = {
         phase: 'result',
         roundResult: 'Question reported as invalid by both players. No points awarded.',
         postAnswerReportRequests: [],
         postAnswerReportRequestedBy: null,
-        showModeratorAnswer: true // Show the moderator's answer anyway
-      });
+        showModeratorAnswer: true,
+        decision: 'invalidated'
+      };
+      
+      // WICHTIG: Ziehe den Punkt zurück, den der Challenger eventuell schon bekommen hat.
+      // Der Punkt für den Moderator wird erst in 'make-decision' vergeben, was hier übersprungen wird.
+      if (game.challengerCorrect) {
+        updates.challengerScore = game.challengerScore - 1;
+        console.log(`Reverted challenger score for game ${gameId} from ${game.challengerScore} to ${updates.challengerScore}`);
+      }
+      
+      // Spiel mit den Korrekturen aktualisieren
+      gameManager.updateGame(gameId, updates);
+      
+      // Den finalen, korrigierten Spielzustand holen und an alle senden
+      const updatedGame = gameManager.getGame(gameId);
       
       io.to(gameId).emit('question-invalidated', { reason });
-      io.to(gameId).emit('game-updated', game);
+      io.to(gameId).emit('game-updated', updatedGame);
+
     } else {
+      // Wenn nur ein Spieler gemeldet hat, nur den Zustand aktualisieren
       gameManager.updateGame(gameId, {});
       io.to(gameId).emit('game-updated', game);
     }
+    // **ENDE DER KORREKTUR**
+
   } catch (error) {
     handleSocketError(socket, error, 'request-post-answer-report');
   }

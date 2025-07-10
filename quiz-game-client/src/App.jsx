@@ -38,6 +38,7 @@ const QuizGame = () => {
   const [lastPing, setLastPing] = useState(Date.now());
   const [wantToSkip, setWantToSkip] = useState(false);
   const [skipRequested, setSkipRequested] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
 
   const [gameDifficulty, setGameDifficulty] = useState('medium');
   const [gameCategory, setGameCategory] = useState('');
@@ -260,7 +261,8 @@ const QuizGame = () => {
       setMyAnswered(false);
     });
 
-    socketRef.current.on('game-updated', (game) => {    
+    socketRef.current.on('game-updated', (game) => {  
+      setIsJoining(false);  
       if (gameData.challengerScore !== undefined && game.challengerScore > gameData.challengerScore) {
         setAnimateScore(true);
         setTimeout(() => setAnimateScore(false), 1000);
@@ -359,6 +361,7 @@ const QuizGame = () => {
     });
 
     socketRef.current.on('error', (data) => {
+      setIsJoining(false);
       console.error('Socket error:', data);
       setConnectionError(data.message || 'An error occurred');
     });
@@ -427,9 +430,12 @@ const QuizGame = () => {
       }
     });
   };
-
   const joinGame = () => {
     if (!joinGameId.trim() || !playerName.trim() || !connected) return;
+    
+    // HINZUFÜGEN: Ladezustand aktivieren
+    setIsJoining(true);
+
     socketRef.current.emit('join-game', {
       gameId: joinGameId.toUpperCase(),
       playerName: playerName.trim()
@@ -656,6 +662,19 @@ const QuizGame = () => {
 
   // Menu Screen
   if (gameState === 'menu') {
+    if (isJoining) {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4 flex items-center justify-center">
+          {renderConnectionStatus()}
+          <div className="text-center text-white">
+            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-white mx-auto mb-4"></div>
+            <h1 className="text-2xl font-bold mb-2">Spiel wird beigetreten...</h1>
+            <p className="text-gray-300">Warte auf Bestätigung vom Server.</p>
+            <p className="text-gray-400 text-sm mt-4">Wenn der Host die Rollen gewählt hat, geht es automatisch weiter.</p>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4">
         {renderConnectionStatus()}
