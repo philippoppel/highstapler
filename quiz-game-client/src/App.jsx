@@ -441,16 +441,17 @@ const QuizGame = () => {
   };
 
   const submitAnswer = () => {
-    if (!myAnswer || myAnswered || !connected || !socketRef.current?.connected) {
-      return;
-    }
-  
+    if (!myAnswer || myAnswered || !connected) return;
+    
+    hapticFeedback('light');
     setMyAnswered(true);
     socketRef.current.emit('submit-answer', { gameId, answer: myAnswer });
   };
 
   const makeDecision = (decision) => {
     if (!connected) return;
+    
+    hapticFeedback(decision === 'trust' ? 'success' : 'light');
     socketRef.current.emit('make-decision', { gameId, decision });
   };
 
@@ -469,11 +470,22 @@ const QuizGame = () => {
     socketRef.current.emit('cancel-post-answer-report', { gameId });
   };
 
+  const hapticFeedback = (type = 'light') => {
+    if (window.navigator && window.navigator.vibrate) {
+      switch(type) {
+        case 'success': window.navigator.vibrate([100, 50, 100]); break;
+        case 'error': window.navigator.vibrate([200, 100, 200]); break;
+        case 'light': window.navigator.vibrate(50); break;
+        default: window.navigator.vibrate(50);
+      }
+    }
+  };
+
   // --- Render Helper Components ---
   const renderConnectionStatus = () => {
     const quality = getConnectionQuality();
     return (
-      <div className="fixed top-4 right-4 space-y-2 z-50">
+      <div className="fixed top-safe right-4 space-y-2 z-50" style={{top: 'max(1rem, env(safe-area-inset-top))'}}>
         {/* Connection Status */}
         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs transition-all ${
           connected 
@@ -575,7 +587,11 @@ const QuizGame = () => {
   // Role Selection Screen
   if (gameState === 'role-selection') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4">
+      <div className="min-h-screen min-h-[100dvh] bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4">
+            {/* Landscape Warning */}
+        <div className="landscape-warning">
+          📱 For best experience, please use portrait mode
+        </div>
         {renderConnectionStatus()}
         {renderErrorNotification()}
         {renderFocusWarning()}
@@ -673,7 +689,7 @@ const QuizGame = () => {
         {renderConnectionStatus()}
         {renderErrorNotification()}
         {renderFocusWarning()}
-        <div className="max-w-md mx-auto pt-8">
+        <div className="max-w-md mx-auto pt-8 px-4 md:px-0">
           <div className="text-center mb-8 animate-fade-in">
             <div className="flex justify-center mb-4">
               <div className="relative">
@@ -719,14 +735,18 @@ const QuizGame = () => {
               </h2>
               <div className="space-y-4">
                 <div>
-                  <input
-                    type="text"
-                    value={playerName}
-                    onChange={(e) => setPlayerName(e.target.value)}
-                    className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-blue-400 focus:outline-none transition-all"
-                    placeholder="Your name (2-15 characters)"
-                    maxLength={15}
-                  />
+                <input
+                  type="text"
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value)}
+                  className="w-full p-4 text-lg rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-blue-400 focus:outline-none transition-all touch-manipulation"
+                  placeholder="Your name (2-15 characters)"
+                  maxLength={15}
+                  autoComplete="name"
+                  autoCapitalize="words"
+                  autoCorrect="off"
+                  spellCheck="false"
+                />
                   {playerName && !isValidPlayerName(playerName) && (
                     <p className="text-red-400 text-xs mt-1">Name must be 2-15 characters</p>
                   )}
@@ -803,14 +823,19 @@ const QuizGame = () => {
                   )}
                 </div>
                 <div>
-                  <input
-                    type="text"
-                    value={joinGameId}
-                    onChange={(e) => setJoinGameId(e.target.value.toUpperCase())}
-                    className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-green-400 focus:outline-none transition-all font-mono text-center text-lg"
-                    placeholder="GAME CODE (6 characters)"
-                    maxLength={6}
-                  />
+                <input
+                  type="text"
+                  value={joinGameId}
+                  onChange={(e) => setJoinGameId(e.target.value.toUpperCase())}
+                  className="w-full p-4 text-xl rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-green-400 focus:outline-none transition-all font-mono text-center touch-manipulation"
+                  placeholder="GAME CODE"
+                  maxLength={6}
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck="false"
+                  inputMode="text"
+                />
                   {joinGameId && !isValidGameId(joinGameId) && (
                     <p className="text-red-400 text-xs mt-1">Game code must be 6 characters</p>
                   )}
@@ -990,8 +1015,8 @@ const QuizGame = () => {
         {renderConnectionStatus()}
         {renderErrorNotification()}
         {renderFocusWarning()}
-        <div className="max-w-2xl mx-auto">
-          {/* Header */}
+        <div className="max-w-2xl mx-auto px-4 md:px-0">
+        {/* Header */}
           <div className="text-center mb-4 pt-4">
             <h1 className="text-2xl font-bold text-white">Trust or Doubt</h1>
             <p className="text-gray-300 text-sm">Question {gameData.currentQuestion + 1}</p>
@@ -1042,21 +1067,20 @@ const QuizGame = () => {
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   {currentQ.options.map((option, index) => (
                     <button
-                      key={index}
-                      onClick={() => setMyAnswer(index.toString())}
-                      disabled={myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered) || !connected}
-                      className={`p-3 rounded-xl border-2 transition-all transform hover:scale-105 active:scale-95 ${myAnswer === index.toString() ? 'border-blue-400 bg-blue-400/20 text-white' : 'border-white/30 bg-white/10 text-gray-300 hover:border-white/50 hover:bg-white/20'} ${(myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered) || !connected) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                    >
-                      <span className="font-bold text-sm">{String.fromCharCode(65 + index)}) {option}</span>
-                    </button>
+                    key={index}
+                    onClick={() => setMyAnswer(index.toString())}
+                    className={`p-4 min-h-[64px] rounded-xl border-2 transition-all transform active:scale-95 touch-manipulation ${myAnswer === index.toString() ? 'border-blue-400 bg-blue-400/30 text-white shadow-lg' : 'border-white/30 bg-white/10 text-gray-300 active:border-white/50 active:bg-white/20'}`}
+                  >
+                    <span className="font-bold text-base leading-tight">{String.fromCharCode(65 + index)}) {option}</span>
+                  </button>
                   ))}
                 </div>
                 <div className="text-center">
-                  <button
-                    onClick={submitAnswer}
-                    disabled={!myAnswer || myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered) || !connected}
-                    className="bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-8 rounded-xl hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
-                  >
+                <button
+                  onClick={submitAnswer}
+                  disabled={!myAnswer || myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered) || !connected}
+                  className="bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-4 px-8 text-lg rounded-xl hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95 touch-manipulation min-h-[56px] active:bg-blue-700"
+                >
                     {!connected ? 'Connection lost' : (myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered)) ? 'Answered' : 'Answer'}
                   </button>
                   
