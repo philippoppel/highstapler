@@ -302,6 +302,10 @@ const QuizGame = () => {
         setSkipRequested(false);
         setCanReportAfterAnswer(false);
       }
+
+      if (newGameData.phase === 'decision') {
+        setCanReportAfterAnswer(true);
+      }
  
       // --- 4. Handle animations based on the new data ---
       // This should be done in a useEffect hook that watches for changes in `gameData`
@@ -312,7 +316,6 @@ const QuizGame = () => {
     socketRef.current.on('question-invalidated', (data) => {
       console.log('Question invalidated - both players agreed');
       setCanReportAfterAnswer(false);
-      setPostAnswerReportRequested(false);
       setConnectionError(`Question was reported as invalid. Both players get 0 points.`);
       setTimeout(() => setConnectionError(''), 4000);
     });
