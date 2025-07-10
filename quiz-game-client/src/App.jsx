@@ -71,44 +71,44 @@ const QuizGame = () => {
   }, [connectionError, connected]);
 
   // Focus detection for anti-cheat
-useEffect(() => {
-  const handleFocus = () => {
-    setWindowFocused(true);
-    if (focusLostTime) {
-      const timeAway = Date.now() - focusLostTime;
-      if (timeAway > 3000 && gameState === 'playing') { // 3 seconds threshold
-        setFocusWarningShown(true);
-        setTimeout(() => setFocusWarningShown(false), 5000);
+  useEffect(() => {
+    const handleFocus = () => {
+      setWindowFocused(true);
+      if (focusLostTime) {
+        const timeAway = Date.now() - focusLostTime;
+        if (timeAway > 3000 && gameState === 'playing') { // 3 seconds threshold
+          setFocusWarningShown(true);
+          setTimeout(() => setFocusWarningShown(false), 5000);
+        }
+        setFocusLostTime(null);
       }
-      setFocusLostTime(null);
-    }
-  };
+    };
 
-  const handleBlur = () => {
-    setWindowFocused(false);
-    if (gameState === 'playing' && gameData.phase === 'answering') {
-      setFocusLostTime(Date.now());
-    }
-  };
+    const handleBlur = () => {
+      setWindowFocused(false);
+      if (gameState === 'playing' && gameData.phase === 'answering') {
+        setFocusLostTime(Date.now());
+      }
+    };
 
-  const handleVisibilityChange = () => {
-    if (document.hidden) {
-      handleBlur();
-    } else {
-      handleFocus();
-    }
-  };
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        handleBlur();
+      } else {
+        handleFocus();
+      }
+    };
 
-  window.addEventListener('focus', handleFocus);
-  window.addEventListener('blur', handleBlur);
-  document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
-  return () => {
-    window.removeEventListener('focus', handleFocus);
-    window.removeEventListener('blur', handleBlur);
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-  };
-}, [gameState, gameData.phase, focusLostTime]);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [gameState, gameData.phase, focusLostTime]);
 
   // Determines connection quality based on ping
   const getConnectionQuality = () => {
@@ -217,7 +217,7 @@ useEffect(() => {
       if (data.reconnectToken) {
         setReconnectToken(data.reconnectToken);
         localStorage.setItem('reconnectToken', data.reconnectToken);
-        localStorage.setItem('tokenTimestamp', Date.now().toString()); // NEU
+        localStorage.setItem('tokenTimestamp', Date.now().toString());
       }
       
       localStorage.setItem('gameId', data.gameId);
@@ -236,7 +236,7 @@ useEffect(() => {
       if (data.reconnectToken) {
         setReconnectToken(data.reconnectToken);
         localStorage.setItem('reconnectToken', data.reconnectToken);
-        localStorage.setItem('tokenTimestamp', Date.now().toString()); // NEU
+        localStorage.setItem('tokenTimestamp', Date.now().toString());
       }
       
       localStorage.setItem('gameId', data.gameId);
@@ -285,7 +285,7 @@ useEffect(() => {
         setPostAnswerReportRequested(false);
       }
       
-      // NEW: Enable reporting after both players answered
+      // Enable reporting after both players answered
       if (game.phase === 'decision' && game.challengerAnswered && game.moderatorAnswered) {
         setCanReportAfterAnswer(true);
       }
@@ -302,23 +302,24 @@ useEffect(() => {
         setCanReportAfterAnswer(false);
         setPostAnswerReportRequested(false);
       }
-      socketRef.current.on('post-answer-report-requested', (data) => {
-        console.log('Post-answer report requested by:', data.playerName);
-        setPostAnswerReportRequested(true);
-      });
+    });
     
-      socketRef.current.on('post-answer-report-cancelled', () => {
-        console.log('Post-answer report cancelled');
-        setPostAnswerReportRequested(false);
-      });
+    socketRef.current.on('post-answer-report-requested', (data) => {
+      console.log('Post-answer report requested by:', data.playerName);
+      setPostAnswerReportRequested(true);
+    });
     
-      socketRef.current.on('question-invalidated', (data) => {
-        console.log('Question invalidated - both players agreed');
-        setCanReportAfterAnswer(false);
-        setPostAnswerReportRequested(false);
-        setConnectionError(`Question was reported as invalid. Both players get 0 points.`);
-        setTimeout(() => setConnectionError(''), 4000);
-      });
+    socketRef.current.on('post-answer-report-cancelled', () => {
+      console.log('Post-answer report cancelled');
+      setPostAnswerReportRequested(false);
+    });
+    
+    socketRef.current.on('question-invalidated', (data) => {
+      console.log('Question invalidated - both players agreed');
+      setCanReportAfterAnswer(false);
+      setPostAnswerReportRequested(false);
+      setConnectionError(`Question was reported as invalid. Both players get 0 points.`);
+      setTimeout(() => setConnectionError(''), 4000);
     });
 
     socketRef.current.on('game-started', (game) => {
@@ -359,7 +360,7 @@ useEffect(() => {
       setConnectionError(data.message || 'An error occurred');
     });
 
-  }, [reconnectToken, gameState]);
+  }, [reconnectToken, gameState, gameData.challengerScore, gameData.challengerCoins, gameData.phase, playerName]);
 
   // Attempt reconnection with token
   const attemptReconnect = useCallback(() => {
@@ -370,29 +371,29 @@ useEffect(() => {
     }
   }, [reconnectToken]);
 
-// Check for reconnect data on page load
-useEffect(() => {
-  const savedGameId = localStorage.getItem('gameId');
-  const savedPlayerName = localStorage.getItem('playerName');
-  const savedReconnectToken = localStorage.getItem('reconnectToken');
-  const savedTimestamp = localStorage.getItem('tokenTimestamp');
-  
-  if (savedGameId && savedPlayerName && savedReconnectToken && gameState === 'menu') {
-    const tokenAge = Date.now() - (parseInt(savedTimestamp) || 0);
-    if (tokenAge < 30 * 60 * 1000) { // 30 Minuten
-      setPlayerName(savedPlayerName);
-      setJoinGameId(savedGameId);
-      setReconnectToken(savedReconnectToken);
-      setTimeout(() => {
-        if (socketRef.current?.connected) {
-          attemptReconnect();
-        }
-      }, 500);
-    } else {
-      clearAllSessionData();
+  // Check for reconnect data on page load
+  useEffect(() => {
+    const savedGameId = localStorage.getItem('gameId');
+    const savedPlayerName = localStorage.getItem('playerName');
+    const savedReconnectToken = localStorage.getItem('reconnectToken');
+    const savedTimestamp = localStorage.getItem('tokenTimestamp');
+    
+    if (savedGameId && savedPlayerName && savedReconnectToken && gameState === 'menu') {
+      const tokenAge = Date.now() - (parseInt(savedTimestamp) || 0);
+      if (tokenAge < 30 * 60 * 1000) { // 30 Minuten
+        setPlayerName(savedPlayerName);
+        setJoinGameId(savedGameId);
+        setReconnectToken(savedReconnectToken);
+        setTimeout(() => {
+          if (socketRef.current?.connected) {
+            attemptReconnect();
+          }
+        }, 500);
+      } else {
+        clearAllSessionData();
+      }
     }
-  }
-}, []);
+  }, [attemptReconnect, gameState]);
 
   // Initialize socket on mount
   useEffect(() => {
@@ -404,7 +405,7 @@ useEffect(() => {
         socketRef.current = null;
       }
     };
-  }, []); // Leere dependency array!
+  }, [initializeSocket]);
 
   // --- Game Actions ---
   const retryConnection = () => {
@@ -539,7 +540,6 @@ useEffect(() => {
     );
   };
 
-
   const renderFocusWarning = () => {
     if (!focusWarningShown) return null;
     return (
@@ -561,11 +561,92 @@ useEffect(() => {
       </div>
     );
   };
+
   // Input validation helpers
   const isValidPlayerName = (name) => name.trim().length >= 2 && name.trim().length <= 15;
   const isValidGameId = (id) => /^[A-Z0-9]{6}$/.test(id);
 
   // --- Main Render Logic based on gameState ---
+  // Role Selection Screen
+  if (gameState === 'role-selection') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4">
+        {renderConnectionStatus()}
+        {renderErrorNotification()}
+        {renderFocusWarning()}
+        <div className="max-w-md mx-auto pt-8">
+          <div className="text-center mb-8 animate-fade-in">
+            <h1 className="text-3xl font-bold text-white mb-2">Choose Roles</h1>
+            <p className="text-gray-300 text-sm">Game Master, pick your role!</p>
+          </div>
+          
+          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 animate-scale-in">
+            {playerRole === 'host' ? (
+              <div className="space-y-6">
+                <div className="text-center mb-4">
+                  <p className="text-white text-sm mb-4">Choose which role you want to play:</p>
+                </div>
+                
+                <div className="grid grid-cols-1 gap-4">
+                  <button 
+                    onClick={() => socketRef.current.emit('choose-role', {gameId, choice: 'challenger'})}
+                    disabled={!connected}
+                    className="bg-gradient-to-r from-blue-500/20 to-blue-600/20 p-6 rounded-xl hover:from-blue-500/30 hover:to-blue-600/30 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50"
+                  >
+                    <div className="flex items-center gap-4">
+                      <Zap className="w-10 h-10 text-blue-400" />
+                      <div className="text-left flex-1">
+                        <h3 className="text-lg font-bold text-white">I'll be Challenger</h3>
+                        <p className="text-gray-300 text-sm">Answer questions, make decisions, risk coins</p>
+                        <div className="flex items-center gap-1 mt-2">
+                          <Coins className="w-4 h-4 text-yellow-400" />
+                          <span className="text-yellow-400 text-sm font-bold">Start with {gameData.initialCoins || '1-3'} coins</span>
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                  
+                  <button 
+                    onClick={() => socketRef.current.emit('choose-role', {gameId, choice: 'moderator'})}
+                    disabled={!connected}
+                    className="bg-gradient-to-r from-purple-500/20 to-purple-600/20 p-6 rounded-xl hover:from-purple-500/30 hover:to-purple-600/30 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50"
+                  >
+                    <div className="flex items-center gap-4">
+                      <Shield className="w-10 h-10 text-purple-400" />
+                      <div className="text-left flex-1">
+                        <h3 className="text-lg font-bold text-white">I'll be Moderator</h3>
+                        <p className="text-gray-300 text-sm">Answer questions, build trust, earn points</p>
+                        <p className="text-purple-300 text-sm mt-2">Earn points when trusted or when right</p>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+                
+                <div className="text-center pt-4 border-t border-white/20">
+                  <button 
+                    onClick={() => socketRef.current.emit('choose-role', {gameId, choice: 'random'})}
+                    disabled={!connected}
+                    className="bg-white/20 text-white py-3 px-6 rounded-xl hover:bg-white/30 transition-all"
+                  >
+                    🎲 Random Assignment
+                  </button>
+                  <p className="text-gray-400 text-xs mt-2">Let fate decide!</p>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center">
+                <div className="animate-pulse mb-4">
+                  <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                </div>
+                <h3 className="text-lg font-bold text-white mb-2">Waiting for Game Master</h3>
+                <p className="text-gray-300 text-sm">The host is choosing roles...</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Menu Screen
   if (gameState === 'menu') {
@@ -587,76 +668,90 @@ useEffect(() => {
           </div>
           
           <div className="space-y-4">
-{/* Create Game */}
-<div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 hover:bg-white/15 transition-all">
-  <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-    <Users className="text-blue-400" /> New Game
-  </h2>
-  <div className="space-y-4">
-    <div>
-      <input
-        type="text"
-        value={playerName}
-        onChange={(e) => setPlayerName(e.target.value)}
-        className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-blue-400 focus:outline-none transition-all"
-        placeholder="Your name (2-15 characters)"
-        maxLength={15}
-      />
-      {playerName && !isValidPlayerName(playerName) && (
-        <p className="text-red-400 text-xs mt-1">Name must be 2-15 characters</p>
-      )}
-    </div>
-    
-    {/* Difficulty Selection */}
-    <div>
-      <label className="text-white text-sm mb-2 block">Difficulty</label>
-      <div className="grid grid-cols-3 gap-2">
-        <button
-          onClick={() => setGameDifficulty('easy')}
-          className={`p-2 rounded-lg transition-all ${gameDifficulty === 'easy' ? 'bg-green-500/30 border-green-400 border-2' : 'bg-white/10 border-white/30 border'}`}
-        >
-          <span className="text-white text-sm">Easy</span>
-        </button>
-        <button
-          onClick={() => setGameDifficulty('medium')}
-          className={`p-2 rounded-lg transition-all ${gameDifficulty === 'medium' ? 'bg-yellow-500/30 border-yellow-400 border-2' : 'bg-white/10 border-white/30 border'}`}
-        >
-          <span className="text-white text-sm">Medium</span>
-        </button>
-        <button
-          onClick={() => setGameDifficulty('hard')}
-          className={`p-2 rounded-lg transition-all ${gameDifficulty === 'hard' ? 'bg-red-500/30 border-red-400 border-2' : 'bg-white/10 border-white/30 border'}`}
-        >
-          <span className="text-white text-sm">Hard</span>
-        </button>
-      </div>
-    </div>
-    
-    {/* Category Input */}
-    <div>
-      <label className="text-white text-sm mb-2 block">
-        Topic/Category <span className="text-gray-400">(optional)</span>
-      </label>
-      <input
-        type="text"
-        value={gameCategory}
-        onChange={(e) => setGameCategory(e.target.value)}
-        className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-blue-400 focus:outline-none transition-all"
-        placeholder="e.g. SpongeBob, Marvel, History..."
-        maxLength={30}
-      />
-      <p className="text-gray-400 text-xs mt-1">Leave empty for general knowledge</p>
-    </div>
-    
-    <button
-      onClick={createGame}
-      disabled={!isValidPlayerName(playerName) || !connected}
-      className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-6 rounded-xl hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
-    >
-      {connected ? 'Create Game' : 'Connecting...'}
-    </button>
-  </div>
-</div>
+            {/* AI Disclaimer */}
+            <div className="bg-yellow-500/10 backdrop-blur-lg rounded-xl p-4 border border-yellow-500/30">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-yellow-400 font-bold text-sm mb-1">AI-Generated Content</h3>
+                  <p className="text-yellow-300 text-xs leading-relaxed">
+                    Questions and answers are AI-generated and may contain errors. 
+                    Report invalid questions during gameplay if needed.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Create Game */}
+            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 hover:bg-white/15 transition-all">
+              <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                <Users className="text-blue-400" /> New Game
+              </h2>
+              <div className="space-y-4">
+                <div>
+                  <input
+                    type="text"
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-blue-400 focus:outline-none transition-all"
+                    placeholder="Your name (2-15 characters)"
+                    maxLength={15}
+                  />
+                  {playerName && !isValidPlayerName(playerName) && (
+                    <p className="text-red-400 text-xs mt-1">Name must be 2-15 characters</p>
+                  )}
+                </div>
+                
+                {/* Difficulty Selection */}
+                <div>
+                  <label className="text-white text-sm mb-2 block">Difficulty</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => setGameDifficulty('easy')}
+                      className={`p-2 rounded-lg transition-all ${gameDifficulty === 'easy' ? 'bg-green-500/30 border-green-400 border-2' : 'bg-white/10 border-white/30 border'}`}
+                    >
+                      <span className="text-white text-sm">Easy</span>
+                    </button>
+                    <button
+                      onClick={() => setGameDifficulty('medium')}
+                      className={`p-2 rounded-lg transition-all ${gameDifficulty === 'medium' ? 'bg-yellow-500/30 border-yellow-400 border-2' : 'bg-white/10 border-white/30 border'}`}
+                    >
+                      <span className="text-white text-sm">Medium</span>
+                    </button>
+                    <button
+                      onClick={() => setGameDifficulty('hard')}
+                      className={`p-2 rounded-lg transition-all ${gameDifficulty === 'hard' ? 'bg-red-500/30 border-red-400 border-2' : 'bg-white/10 border-white/30 border'}`}
+                    >
+                      <span className="text-white text-sm">Hard</span>
+                    </button>
+                  </div>
+                </div>
+                
+                {/* Category Input */}
+                <div>
+                  <label className="text-white text-sm mb-2 block">
+                    Topic/Category <span className="text-gray-400">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={gameCategory}
+                    onChange={(e) => setGameCategory(e.target.value)}
+                    className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-blue-400 focus:outline-none transition-all"
+                    placeholder="e.g. SpongeBob, Marvel, History..."
+                    maxLength={30}
+                  />
+                  <p className="text-gray-400 text-xs mt-1">Leave empty for general knowledge</p>
+                </div>
+                
+                <button
+                  onClick={createGame}
+                  disabled={!isValidPlayerName(playerName) || !connected}
+                  className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-6 rounded-xl hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
+                >
+                  {connected ? 'Create Game' : 'Connecting...'}
+                </button>
+              </div>
+            </div>
             
             {/* Join Game */}
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 hover:bg-white/15 transition-all">
@@ -843,20 +938,22 @@ useEffect(() => {
   if (gameState === 'playing') {
     const currentQ = gameData.questions?.[gameData.currentQuestion];
 
-    if (!currentQ) return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-white mx-auto mb-4"></div>
-          <p className="text-white text-xl">Loading questions...</p>
+    if (!currentQ) {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-white mx-auto mb-4"></div>
+            <p className="text-white text-xl">Loading questions...</p>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4 pb-20">
-      {renderConnectionStatus()}
-      {renderErrorNotification()}
-      {renderFocusWarning()}
+        {renderConnectionStatus()}
+        {renderErrorNotification()}
+        {renderFocusWarning()}
         <div className="max-w-2xl mx-auto">
           {/* Header */}
           <div className="text-center mb-4 pt-4">
@@ -926,38 +1023,40 @@ useEffect(() => {
                   >
                     {!connected ? 'Connection lost' : (myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered)) ? 'Answered' : 'Answer'}
                   </button>
+                  
                   {/* Skip/Report Section */}
-<div className="mt-4 text-center">
-  {!skipRequested && !gameData.skipRequests?.includes(socketRef.current?.id) ? (
-    <button
-      onClick={requestSkip}
-      disabled={!connected}
-      className="text-gray-400 hover:text-white text-sm underline transition-all"
-    >
-      Report/Skip this question
-    </button>
-  ) : (
-    <div className="bg-yellow-500/20 rounded-xl p-3 inline-block">
-      <p className="text-yellow-400 text-sm">
-        {skipRequested ? 'You requested to skip this question' : `${gameData.skipRequestedBy || 'Other player'} wants to skip`}
-      </p>
-      {skipRequested && (
-        <button
-          onClick={cancelSkip}
-          className="text-xs text-yellow-300 hover:text-yellow-100 underline mt-1"
-        >
-          Cancel request
-        </button>
-      )}
-    </div>
-  )}
-  
-  {gameData.skipRequests?.length === 2 && (
-    <p className="text-green-400 text-sm mt-2 animate-pulse">
-      Both players agreed - skipping question...
-    </p>
-  )}
-</div>
+                  <div className="mt-4 text-center">
+                    {!skipRequested && !gameData.skipRequests?.includes(socketRef.current?.id) ? (
+                      <button
+                        onClick={requestSkip}
+                        disabled={!connected}
+                        className="text-gray-400 hover:text-white text-sm underline transition-all"
+                      >
+                        Report/Skip this question
+                      </button>
+                    ) : (
+                      <div className="bg-yellow-500/20 rounded-xl p-3 inline-block">
+                        <p className="text-yellow-400 text-sm">
+                          {skipRequested ? 'You requested to skip this question' : `${gameData.skipRequestedBy || 'Other player'} wants to skip`}
+                        </p>
+                        {skipRequested && (
+                          <button
+                            onClick={cancelSkip}
+                            className="text-xs text-yellow-300 hover:text-yellow-100 underline mt-1"
+                          >
+                            Cancel request
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    
+                    {gameData.skipRequests?.length === 2 && (
+                      <p className="text-green-400 text-sm mt-2 animate-pulse">
+                        Both players agreed - skipping question...
+                      </p>
+                    )}
+                  </div>
+                  
                   {(myAnswered || (gameRole === 'challenger' ? gameData.challengerAnswered : gameData.moderatorAnswered)) && (
                     <div className="mt-3">
                       <p className="text-gray-400 text-sm animate-pulse">Waiting for the other player's answer...</p>
@@ -969,89 +1068,107 @@ useEffect(() => {
             )}
             
             {gameData.phase === 'decision' && (
-  <div className="text-center animate-fade-in">
-    <div className="mb-4">
-      <div className="bg-white/20 rounded-xl p-4 mb-4">
-        <p className="text-sm text-gray-300 mb-2">Your answer:</p>
-        {(() => {
-          const answerIndex = gameRole === 'challenger' ? parseInt(gameData.challengerAnswer) : parseInt(gameData.moderatorAnswer);
-          const isCorrect = gameRole === 'challenger' ? gameData.challengerCorrect : answerIndex === currentQ.correct;
-          return (
-            <>
-              <p className="text-lg font-bold">{String.fromCharCode(65 + answerIndex)} – {currentQ.options[answerIndex]}</p>
-              <div className="flex justify-center items-center gap-2 mt-2">
-                {isCorrect ? (
-                  <><CheckCircle className="text-green-400 w-5 h-5" /><span className="text-green-400 font-bold">Correct! +1 point</span></>
+              <div className="text-center animate-fade-in">
+                <div className="mb-4">
+                  <div className="bg-white/20 rounded-xl p-4 mb-4">
+                    <p className="text-sm text-gray-300 mb-2">Your answer:</p>
+                    {(() => {
+                      const answerIndex = gameRole === 'challenger' ? parseInt(gameData.challengerAnswer) : parseInt(gameData.moderatorAnswer);
+                      const isCorrect = gameRole === 'challenger' ? gameData.challengerCorrect : answerIndex === currentQ.correct;
+                      return (
+                        <>
+                          <p className="text-lg font-bold">{String.fromCharCode(65 + answerIndex)} – {currentQ.options[answerIndex]}</p>
+                          <div className="flex justify-center items-center gap-2 mt-2">
+                            {isCorrect ? (
+                              <><CheckCircle className="text-green-400 w-5 h-5" /><span className="text-green-400 font-bold">Correct! +1 point</span></>
+                            ) : (
+                              <><XCircle className="text-red-400 w-5 h-5" /><span className="text-red-400 font-bold">Incorrect!</span></>
+                            )}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Game Rules Reminder */}
+                  {gameRole === 'challenger' && gameData.challengerCoins <= 2 && (
+                    <div className="bg-orange-500/10 backdrop-blur-lg rounded-xl p-3 mb-4 border border-orange-500/30">
+                      <div className="flex items-center gap-2">
+                        <Coins className="w-4 h-4 text-orange-400" />
+                        <p className="text-orange-300 text-xs">
+                          <strong>Reminder:</strong> When you doubt, you get your coin back if the moderator is wrong. 
+                          Game ends at 0 coins!
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Post-Answer Report Section */}
+                  {canReportAfterAnswer && (
+                    <div className="mb-4">
+                      {!postAnswerReportRequested && !gameData.postAnswerReportRequests?.includes(socketRef.current?.id) ? (
+                        <button
+                          onClick={requestPostAnswerReport}
+                          disabled={!connected}
+                          className="text-orange-400 hover:text-orange-200 text-sm underline transition-all"
+                        >
+                          Report this question as invalid
+                        </button>
+                      ) : (
+                        <div className="bg-orange-500/20 rounded-xl p-3 inline-block">
+                          <p className="text-orange-400 text-sm">
+                            {gameData.postAnswerReportRequests?.includes(socketRef.current?.id) 
+                              ? 'You reported this question as invalid' 
+                              : `${gameData.postAnswerReportRequestedBy || 'Other player'} reported this question`}
+                          </p>
+                          {gameData.postAnswerReportRequests?.includes(socketRef.current?.id) && (
+                            <button
+                              onClick={cancelPostAnswerReport}
+                              className="text-xs text-orange-300 hover:text-orange-100 underline mt-1"
+                            >
+                              Cancel report
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      
+                      {gameData.postAnswerReportRequests?.length === 2 && (
+                        <p className="text-red-400 text-sm mt-2 animate-pulse">
+                          Both players agreed - question invalidated, 0 points for all!
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+                {gameRole === 'challenger' ? (
+                  <div className="animate-scale-in">
+                    <h3 className="text-lg font-bold text-white mb-3">Time for your decision!</h3>
+                    <p className="text-gray-300 mb-6 text-sm">{gameData.moderatorName} has also answered.<br/>Do you trust or doubt?</p>
+                    <div className="flex gap-3 justify-center">
+                      <button onClick={() => makeDecision('trust')} disabled={!connected} className="bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2">
+                        <Heart className="w-4 h-4" /> Trust
+                      </button>
+                      <button onClick={() => makeDecision('doubt')} disabled={gameData.challengerCoins <= 0 || !connected} className="bg-gradient-to-r from-red-500 to-pink-600 text-white font-bold py-3 px-6 rounded-xl hover:from-red-600 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2">
+                        <Shield className="w-4 h-4" /> 
+                        Doubt 
+                        <div className="text-xs bg-white/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <span>-1</span>
+                          <Coins className="inline w-3 h-3" />
+                        </div>
+                      </button>
+                    </div>
+                    {gameData.challengerCoins <= 0 && <p className="text-red-400 text-sm mt-3 animate-pulse">No more coins to doubt with!</p>}
+                  </div>
                 ) : (
-                  <><XCircle className="text-red-400 w-5 h-5" /><span className="text-red-400 font-bold">Incorrect!</span></>
+                  <div className="text-gray-400 animate-pulse">
+                    <Shield className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                    <p>Waiting for {gameData.challengerName}'s decision...</p>
+                    <div className="w-6 h-6 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mx-auto mt-2"></div>
+                  </div>
                 )}
               </div>
-            </>
-          );
-        })()}
-      </div>
-      
-      {/* NEW: Post-Answer Report Section */}
-      {canReportAfterAnswer && (
-        <div className="mb-4">
-          {!postAnswerReportRequested && !gameData.postAnswerReportRequests?.includes(socketRef.current?.id) ? (
-            <button
-              onClick={requestPostAnswerReport}
-              disabled={!connected}
-              className="text-orange-400 hover:text-orange-200 text-sm underline transition-all"
-            >
-              Report this question as invalid
-            </button>
-          ) : (
-            <div className="bg-orange-500/20 rounded-xl p-3 inline-block">
-              <p className="text-orange-400 text-sm">
-                {gameData.postAnswerReportRequests?.includes(socketRef.current?.id) 
-                  ? 'You reported this question as invalid' 
-                  : `${gameData.postAnswerReportRequestedBy || 'Other player'} reported this question`}
-              </p>
-              {gameData.postAnswerReportRequests?.includes(socketRef.current?.id) && (
-                <button
-                  onClick={cancelPostAnswerReport}
-                  className="text-xs text-orange-300 hover:text-orange-100 underline mt-1"
-                >
-                  Cancel report
-                </button>
-              )}
-            </div>
-          )}
-          
-          {gameData.postAnswerReportRequests?.length === 2 && (
-            <p className="text-red-400 text-sm mt-2 animate-pulse">
-              Both players agreed - question invalidated, 0 points for all!
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-    
-    {gameRole === 'challenger' ? (
-      <div className="animate-scale-in">
-        <h3 className="text-lg font-bold text-white mb-3">Time for your decision!</h3>
-        <p className="text-gray-300 mb-6 text-sm">{gameData.moderatorName} has also answered.<br/>Do you trust or doubt?</p>
-        <div className="flex gap-3 justify-center">
-          <button onClick={() => makeDecision('trust')} disabled={!connected} className="bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2">
-            <Heart className="w-4 h-4" /> Trust
-          </button>
-          <button onClick={() => makeDecision('doubt')} disabled={gameData.challengerCoins <= 0 || !connected} className="bg-gradient-to-r from-red-500 to-pink-600 text-white font-bold py-3 px-6 rounded-xl hover:from-red-600 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2">
-            <Shield className="w-4 h-4" /> Doubt <span className="text-xs bg-white/20 px-2 py-0.5 rounded-full">-1 <Coins className="inline w-3 h-3" /></span>
-          </button>
-        </div>
-        {gameData.challengerCoins <= 0 && <p className="text-red-400 text-sm mt-3 animate-pulse">No more coins to doubt with!</p>}
-      </div>
-    ) : (
-      <div className="text-gray-400 animate-pulse">
-        <Shield className="w-12 h-12 mx-auto mb-3 opacity-50" />
-        <p>Waiting for {gameData.challengerName}'s decision...</p>
-        <div className="w-6 h-6 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mx-auto mt-2"></div>
-      </div>
-    )}
-  </div>
-)}
+            )}
             
             {gameData.phase === 'result' && (
               <div className="text-center animate-fade-in">
@@ -1102,223 +1219,235 @@ useEffect(() => {
   }
 
   // Finished Screen
-// Finished Screen
-if (gameState === 'finished') {
-  const isWinner = gameData.winner === (gameRole === 'challenger' ? gameData.challengerName : gameData.moderatorName);
-  const isDraw = gameData.winner === 'Unentschieden' || gameData.challengerScore === gameData.moderatorScore;
+  if (gameState === 'finished') {
+    const isWinner = gameData.winner === (gameRole === 'challenger' ? gameData.challengerName : gameData.moderatorName);
+    const isDraw = gameData.winner === 'Unentschieden' || gameData.challengerScore === gameData.moderatorScore;
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4 relative overflow-hidden">
-      {renderConnectionStatus()}
-      {renderErrorNotification()}
-      {renderFocusWarning()}
-      {/* Animated Background Effects for Winner */}
-      {!isDraw && (
-        <>
-          <div className="absolute inset-0 pointer-events-none">
-            {[...Array(20)].map((_, i) => (
-              <Star 
-                key={i}
-                className={`absolute text-yellow-400 animate-ping`}
-                style={{
-                  left: `${Math.random() * 100}%`,
-                  top: `${Math.random() * 100}%`,
-                  animationDelay: `${Math.random() * 2}s`,
-                  animationDuration: `${2 + Math.random() * 2}s`
-                }}
-                size={Math.random() * 20 + 10}
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4 relative overflow-hidden">
+        {renderConnectionStatus()}
+        {renderErrorNotification()}
+        {renderFocusWarning()}
+        
+        {/* Animated Background Effects for Winner */}
+        {!isDraw && (
+          <>
+            <div className="absolute inset-0 pointer-events-none">
+              {[...Array(20)].map((_, i) => (
+                <Star 
+                  key={i}
+                  className={`absolute text-yellow-400 animate-ping`}
+                  style={{
+                    left: `${Math.random() * 100}%`,
+                    top: `${Math.random() * 100}%`,
+                    animationDelay: `${Math.random() * 2}s`,
+                    animationDuration: `${2 + Math.random() * 2}s`
+                  }}
+                  size={Math.random() * 20 + 10}
+                />
+              ))}
+            </div>
+
+            <div className="absolute inset-0 pointer-events-none">
+              {[...Array(15)].map((_, i) => (
+                <Sparkles 
+                  key={i}
+                  className="absolute text-yellow-300 animate-bounce"
+                  style={{
+                    left: `${Math.random() * 100}%`,
+                    top: `${Math.random() * 100}%`,
+                    animationDelay: `${Math.random() * 3}s`,
+                    animationDuration: `${1 + Math.random()}s`
+                  }}
+                  size={Math.random() * 15 + 8}
+                />
+              ))}
+            </div>
+          </>
+        )}
+        
+        <div className="max-w-md mx-auto pt-8 relative z-10">
+          <div className="text-center mb-8 animate-fade-in">
+            {/* Winner Trophy Animation */}
+            <div className="relative mb-6">
+              <Trophy 
+                className={`text-yellow-400 w-24 h-24 mx-auto mb-4 ${!isDraw ? 'animate-bounce' : 'animate-pulse'}`} 
               />
-            ))}
-          </div>
-          
-          <div className="absolute inset-0 pointer-events-none">
-            {[...Array(15)].map((_, i) => (
-              <Sparkles 
-                key={i}
-                className="absolute text-yellow-300 animate-bounce"
-                style={{
-                  left: `${Math.random() * 100}%`,
-                  top: `${Math.random() * 100}%`,
-                  animationDelay: `${Math.random() * 3}s`,
-                  animationDuration: `${1 + Math.random()}s`
-                }}
-                size={Math.random() * 15 + 8}
-              />
-            ))}
-          </div>
-        </>
-      )}
-      
-      <div className="max-w-md mx-auto pt-8 relative z-10">
-        <div className="text-center mb-8 animate-fade-in">
-          {/* Winner Trophy Animation */}
-          <div className="relative mb-6">
-            <Trophy 
-              className={`text-yellow-400 w-24 h-24 mx-auto mb-4 ${!isDraw ? 'animate-bounce' : 'animate-pulse'}`} 
-            />
+              
+              {/* Pulsing rings around trophy for winner */}
+              {!isDraw && (
+                <>
+                  <div className="absolute inset-0 w-24 h-24 mx-auto rounded-full border-4 border-yellow-400 animate-ping opacity-30"></div>
+                  <div className="absolute inset-0 w-32 h-32 mx-auto rounded-full border-2 border-yellow-300 animate-ping opacity-20" style={{animationDelay: '0.5s'}}></div>
+                </>
+              )}
+            </div>
             
-            {/* Pulsing rings around trophy for winner */}
+            <h1 className="text-3xl font-bold text-white mb-2">Game Over!</h1>
+            
+            {/* Winner Celebration Text */}
             {!isDraw && (
-              <>
-                <div className="absolute inset-0 w-24 h-24 mx-auto rounded-full border-4 border-yellow-400 animate-ping opacity-30"></div>
-                <div className="absolute inset-0 w-32 h-32 mx-auto rounded-full border-2 border-yellow-300 animate-ping opacity-20" style={{animationDelay: '0.5s'}}></div>
-              </>
+              <div className="mb-4">
+                <div className="text-6xl mb-2 animate-bounce">🎉</div>
+                <p className="text-yellow-400 text-lg font-bold animate-pulse">
+                  Congratulations!
+                </p>
+              </div>
             )}
           </div>
           
-          <h1 className="text-3xl font-bold text-white mb-2">Game Over!</h1>
-          
-          {/* Winner Celebration Text */}
-          {!isDraw && (
-            <div className="mb-4">
-              <div className="text-6xl mb-2 animate-bounce">🎉</div>
-              <p className="text-yellow-400 text-lg font-bold animate-pulse">
-                Congratulations!
-              </p>
-            </div>
-          )}
-        </div>
-        
-        <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 text-center animate-scale-in">
-          <h2 className="text-2xl font-bold text-white mb-6">
-            {isDraw ? (
-              <span className="text-gray-400 animate-pulse">It's a draw!</span>
-            ) : (
-              <div className="space-y-2">
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-400 animate-pulse">
-                  {gameData.winner} wins!
-                </span>
-                {isWinner && (
-                  <div className="text-green-400 text-lg animate-bounce">
-                    🏆 That's you! 🏆
+          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 text-center animate-scale-in">
+            <h2 className="text-2xl font-bold text-white mb-6">
+              {isDraw ? (
+                <span className="text-gray-400 animate-pulse">It's a draw!</span>
+              ) : (
+                <div className="space-y-2">
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-400 animate-pulse">
+                    {gameData.winner} wins!
+                  </span>
+                  {isWinner && (
+                    <div className="text-green-400 text-lg animate-bounce">
+                      🏆 That's you! 🏆
+                    </div>
+                  )}
+                </div>
+              )}
+            </h2>
+            
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className={`bg-white/20 rounded-xl p-4 transform transition-all ${
+                gameData.winner === gameData.challengerName ? 'ring-4 ring-yellow-400 scale-105 animate-pulse' : ''
+              }`}>
+                <Zap className="w-6 h-6 text-blue-400 mx-auto mb-2" />
+                <h3 className="font-bold text-white">{gameData.challengerName}</h3>
+                <p className={`text-2xl font-bold ${
+                  gameData.winner === gameData.challengerName ? 'text-yellow-400' : 'text-blue-400'
+                }`}>
+                  {gameData.challengerScore}
+                </p>
+                <div className="flex items-center justify-center gap-1 mt-1">
+                  <Coins className="w-4 h-4 text-yellow-400" />
+                  <span className="text-sm text-gray-300">{gameData.challengerCoins} left</span>
+                </div>
+                {gameData.winner === gameData.challengerName && (
+                  <div className="mt-2 text-yellow-400 text-sm font-bold animate-bounce">
+                    🎉 WINNER! 🎉
                   </div>
                 )}
               </div>
-            )}
-          </h2>
-          
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className={`bg-white/20 rounded-xl p-4 transform transition-all ${
-              gameData.winner === gameData.challengerName ? 'ring-4 ring-yellow-400 scale-105 animate-pulse' : ''
-            }`}>
-              <Zap className="w-6 h-6 text-blue-400 mx-auto mb-2" />
-              <h3 className="font-bold text-white">{gameData.challengerName}</h3>
-              <p className={`text-2xl font-bold ${
-                gameData.winner === gameData.challengerName ? 'text-yellow-400' : 'text-blue-400'
+              
+              <div className={`bg-white/20 rounded-xl p-4 transform transition-all ${
+                gameData.winner === gameData.moderatorName ? 'ring-4 ring-yellow-400 scale-105 animate-pulse' : ''
               }`}>
-                {gameData.challengerScore}
-              </p>
-              <div className="flex items-center justify-center gap-1 mt-1">
-                <Coins className="w-4 h-4 text-yellow-400" />
-                <span className="text-sm text-gray-300">{gameData.challengerCoins} left</span>
+                <Shield className="w-6 h-6 text-purple-400 mx-auto mb-2" />
+                <h3 className="font-bold text-white">{gameData.moderatorName}</h3>
+                <p className={`text-2xl font-bold ${
+                  gameData.winner === gameData.moderatorName ? 'text-yellow-400' : 'text-purple-400'
+                }`}>
+                  {gameData.moderatorScore}
+                </p>
+                <p className="text-sm text-gray-300 mt-1">Moderator</p>
+                {gameData.winner === gameData.moderatorName && (
+                  <div className="mt-2 text-yellow-400 text-sm font-bold animate-bounce">
+                    🎉 WINNER! 🎉
+                  </div>
+                )}
               </div>
-              {gameData.winner === gameData.challengerName && (
-                <div className="mt-2 text-yellow-400 text-sm font-bold animate-bounce">
-                  🎉 WINNER! 🎉
+            </div>
+            
+            {/* Game End Reason */}
+            <div className="mb-6">
+              {gameData.challengerScore >= 5 && (
+                <div className="bg-blue-500/20 rounded-xl p-3 mb-4">
+                  <p className="text-blue-400 text-sm flex items-center justify-center gap-2">
+                    <Trophy className="w-4 h-4" /> {gameData.challengerName} reached 5 points!
+                  </p>
+                </div>
+              )}
+              {gameData.moderatorScore >= 5 && (
+                <div className="bg-purple-500/20 rounded-xl p-3 mb-4">
+                  <p className="text-purple-400 text-sm flex items-center justify-center gap-2">
+                    <Trophy className="w-4 h-4" /> {gameData.moderatorName} reached 5 points!
+                  </p>
+                </div>
+              )}
+              {gameData.challengerCoins <= 0 && (
+                <div className="bg-red-500/20 rounded-xl p-3 mb-4">
+                  <p className="text-red-400 text-sm flex items-center justify-center gap-2">
+                    <Coins className="w-4 h-4" /> The challenger ran out of coins!
+                  </p>
                 </div>
               )}
             </div>
             
-            <div className={`bg-white/20 rounded-xl p-4 transform transition-all ${
-              gameData.winner === gameData.moderatorName ? 'ring-4 ring-yellow-400 scale-105 animate-pulse' : ''
-            }`}>
-              <Shield className="w-6 h-6 text-purple-400 mx-auto mb-2" />
-              <h3 className="font-bold text-white">{gameData.moderatorName}</h3>
-              <p className={`text-2xl font-bold ${
-                gameData.winner === gameData.moderatorName ? 'text-yellow-400' : 'text-purple-400'
-              }`}>
-                {gameData.moderatorScore}
-              </p>
-              <p className="text-sm text-gray-300 mt-1">Moderator</p>
-              {gameData.winner === gameData.moderatorName && (
-                <div className="mt-2 text-yellow-400 text-sm font-bold animate-bounce">
-                  🎉 WINNER! 🎉
+            {/* Game Statistics */}
+            <div className="bg-white/10 rounded-xl p-4 mb-6">
+              <h3 className="text-white font-bold mb-3">Game Statistics</h3>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-gray-400">Total Rounds</p>
+                  <p className="text-white font-bold">{gameData.currentQuestion + 1}</p>
                 </div>
-              )}
-            </div>
-          </div>
-          
-          {/* Game End Reason */}
-          <div className="mb-6">
-            {gameData.challengerScore >= 5 && (
-              <div className="bg-blue-500/20 rounded-xl p-3 mb-4">
-                <p className="text-blue-400 text-sm flex items-center justify-center gap-2">
-                  <Trophy className="w-4 h-4" /> {gameData.challengerName} reached 5 points!
-                </p>
-              </div>
-            )}
-            {gameData.moderatorScore >= 5 && (
-              <div className="bg-purple-500/20 rounded-xl p-3 mb-4">
-                <p className="text-purple-400 text-sm flex items-center justify-center gap-2">
-                  <Trophy className="w-4 h-4" /> {gameData.moderatorName} reached 5 points!
-                </p>
-              </div>
-            )}
-            {gameData.challengerCoins <= 0 && (
-              <div className="bg-red-500/20 rounded-xl p-3 mb-4">
-                <p className="text-red-400 text-sm flex items-center justify-center gap-2">
-                  <Coins className="w-4 h-4" /> The challenger ran out of coins!
-                </p>
-              </div>
-            )}
-          </div>
-          
-          {/* Game Statistics */}
-          <div className="bg-white/10 rounded-xl p-4 mb-6">
-            <h3 className="text-white font-bold mb-3">Game Statistics</h3>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <p className="text-gray-400">Total Rounds</p>
-                <p className="text-white font-bold">{gameData.currentQuestion + 1}</p>
-              </div>
-              <div>
-                <p className="text-gray-400">Final Coins</p>
-                <p className="text-yellow-400 font-bold">{gameData.challengerCoins}</p>
+                <div>
+                  <p className="text-gray-400">Final Coins</p>
+                  <p className="text-yellow-400 font-bold">{gameData.challengerCoins}</p>
+                </div>
               </div>
             </div>
-          </div>
-          
-          <div className="space-y-3">
-            <button
-              onClick={() => {
-                clearAllSessionData();
-                if (socketRef.current) {
-                  socketRef.current.disconnect();
-                  socketRef.current = null;
-                }
-                window.location.reload();
-              }}
-              className="w-full bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 transition-all transform hover:scale-105 active:scale-95"
-            >
-              🎮 Play Again
-            </button>
-            
-            <button
-              onClick={() => {
-                const resultText = isDraw 
-                  ? `Just played Trust or Doubt and it was a draw! ${gameData.challengerScore}-${gameData.moderatorScore}`
-                  : `Just played Trust or Doubt as ${gameRole === 'challenger' ? 'challenger' : 'moderator'} and ${isWinner ? 'won' : 'lost'}! Final score: ${gameData.challengerScore}-${gameData.moderatorScore}`;
-                
-                if (navigator.share) {
-                  navigator.share({
-                    title: 'Trust or Doubt - Game Result',
-                    text: resultText,
-                    url: window.location.href
-                  });
-                } else {
-                  navigator.clipboard?.writeText(`${resultText} ${window.location.href}`);
-                }
-              }}
-              className="w-full bg-white/20 text-white font-bold py-2 px-6 rounded-xl hover:bg-white/30 transition-all"
-            >
-              📤 Share Result
-            </button>
+
+            {/* Game Rules Summary */}
+            <div className="bg-white/5 rounded-xl p-4 mb-6 text-xs text-gray-400">
+              <h4 className="text-white font-bold mb-2">How to play:</h4>
+              <ul className="space-y-1 text-left">
+                <li>• Challenger: Answer questions, then trust or doubt the moderator</li>
+                <li>• Moderator: Answer questions and build trust to earn points</li>
+                <li>• Doubt costs 1 coin, but you get it back if moderator is wrong</li>
+                <li>• First to 5 points wins, or moderator wins if challenger hits 0 coins</li>
+                <li>• Questions are AI-generated and may contain errors</li>
+              </ul>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={() => {
+                  clearAllSessionData();
+                  if (socketRef.current) {
+                    socketRef.current.disconnect();
+                    socketRef.current = null;
+                  }
+                  window.location.reload();
+                }}
+                className="w-full bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 transition-all transform hover:scale-105 active:scale-95"
+              >
+                🎮 Play Again
+              </button>
+              
+              <button
+                onClick={() => {
+                  const resultText = isDraw 
+                    ? `Just played Trust or Doubt and it was a draw! ${gameData.challengerScore}-${gameData.moderatorScore}`
+                    : `Just played Trust or Doubt as ${gameRole === 'challenger' ? 'challenger' : 'moderator'} and ${isWinner ? 'won' : 'lost'}! Final score: ${gameData.challengerScore}-${gameData.moderatorScore}`;
+                  
+                  if (navigator.share) {
+                    navigator.share({
+                      title: 'Trust or Doubt - Game Result',
+                      text: resultText,
+                      url: window.location.href
+                    });
+                  } else {
+                    navigator.clipboard?.writeText(`${resultText} ${window.location.href}`);
+                  }
+                }}
+                className="w-full bg-white/20 text-white font-bold py-2 px-6 rounded-xl hover:bg-white/30 transition-all"
+              >
+                📤 Share Result
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
   // Paused/Error state
   if (gameState === 'paused' || connectionError) {
