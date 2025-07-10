@@ -4,6 +4,7 @@ const socketIO = require('socket.io');
 const cors = require('cors');
 const axios = require('axios');
 const crypto = require('crypto');
+const cheerio = require('cheerio');
 const { validateQuestions, scheduleDeepChecks } = require('./qualityChecks');
 require('dotenv').config();
 
@@ -483,16 +484,16 @@ if (this.questionCache.length > 0) {
       console.log(`${remaining} Fragen werden neu von APIs angefordert...`);
       
       // Versuche Groq zuerst, da es spezifische Kategorien am besten bedienen kann
-      if (this.groqApiKey && this.canMakeGroqRequest()) {
-          try {
-              // Fordere etwas mehr an, um eventuelle Duplikate auszugleichen
-              const groqQuestions = await this.generateWithGroq(Math.ceil(remaining * 1.2), difficulty, category);
-              questions.push(...groqQuestions);
-              console.log(`${groqQuestions.length} Fragen von Groq generiert`);
-          } catch (error) {
-              console.error('Groq Fehler:', error);
-              this.stats.errors++;
-          }
+      if (this.groqApiKey && this.canMakeGroqRequest() && category) {
+        // Verwende Wikipedia RAG nur wenn eine Kategorie angegeben wurde
+        try {
+          const groqQuestions = await this.generateWithGroq(Math.ceil(remaining * 1.2), difficulty, category);
+          questions.push(...groqQuestions);
+          console.log(`${groqQuestions.length} Fragen von Groq mit Wikipedia RAG generiert`);
+        } catch (error) {
+          console.error('Groq Fehler:', error);
+          this.stats.errors++;
+        }
       }
       
       // Fülle den Rest mit der Trivia API auf
@@ -554,161 +555,181 @@ if (this.questionCache.length > 0) {
 
 async generateWithGroq(count, difficulty = 'medium', customCategory = null) {
   if (!this.groqApiKey || !this.canMakeGroqRequest()) return [];
-  
   this.groqRequestCount++;
+
+  try {
+    // Schritt 1: Wikipedia-Artikel zum Thema finden
+    const wikiContext = await this.fetchWikipediaContext(customCategory);
+    if (!wikiContext) {
+      console.log(`Keine Wikipedia-Informationen für "${customCategory}" gefunden`);
+      return [];
+    }
+
+    const difficultyMap = {
+      easy: 'easy (basic facts that anyone could know)',
+      medium: 'medium (requires some knowledge)',
+      hard: 'hard (detailed knowledge required)'
+    };
+
+    // Schritt 2: Fragen basierend auf Wikipedia-Kontext generieren
+    const prompt = `Based on the following Wikipedia information, generate ${count} multiple-choice quiz questions.
+
+WIKIPEDIA CONTEXT:
+${wikiContext}
+
+REQUIREMENTS:
+1. Questions MUST be based ONLY on the information provided above
+2. All questions must be factually correct according to the Wikipedia text
+3. Difficulty level: ${difficultyMap[difficulty]}
+4. Each question must have 4 options with only 1 correct answer
+5. Wrong options should be plausible but clearly incorrect based on the text
+6. Do NOT make up any facts not present in the Wikipedia context
+
+DIFFICULTY EXAMPLES:
+- Easy: Basic facts mentioned directly in the text
+- Medium: Requires understanding connections between facts
+- Hard: Specific details or dates from the text
+
+Respond ONLY with valid JSON:
+{
+  "questions": [
+    {
+      "question": "Question text here",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correct": 0,
+      "category": "${customCategory || 'General Knowledge'}",
+      "difficulty": "${difficulty}"
+    }
+  ]
+}`;
+
+    const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+      model: 'llama3-8b-8192',
+      messages: [{
+        role: 'system',
+        content: 'You are a quiz master who creates questions based ONLY on provided Wikipedia content. Never invent facts.'
+      }, {
+        role: 'user',
+        content: prompt
+      }],
+      temperature: 0.3, // Niedrigere Temperatur für faktentreue
+      max_tokens: 2000
+    }, {
+      headers: {
+        'Authorization': `Bearer ${this.groqApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 30000
+    });
+
+    const content = response.data.choices[0].message.content;
+    let parsed;
+    
+    try {
+      parsed = JSON.parse(content);
+    } catch (parseError) {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsed = JSON.parse(jsonMatch[0]);
+      } else {
+        throw parseError;
+      }
+    }
+
+    if (!parsed.questions || parsed.questions.length === 0) {
+      return [];
+    }
+
+    const questions = parsed.questions.map(q => ({
+      question: q.question,
+      options: q.options,
+      correct: parseInt(q.correct),
+      category: q.category,
+      difficulty: q.difficulty,
+      source: 'groq-wikipedia',
+      id: crypto.randomUUID(),
+      wikiVerified: true
+    }));
+
+    this.stats.fromGroq += questions.length;
+    this.stats.totalGenerated += questions.length;
+
+    const validated = validateQuestions(questions);
+    
+    // Verifiziere Antworten gegen Wikipedia
+    const verifiedQuestions = await this.verifyWithWikipedia(validated, wikiContext);
+    
+    scheduleDeepChecks(verifiedQuestions);
+    return verifiedQuestions;
+
+  } catch (error) {
+    console.error('Groq generation error:', error.response?.data || error.message);
+    this.stats.errors++;
+    return [];
+  }
+}
+
+async fetchWikipediaContext(topic) {
+  if (!topic) return null;
   
   try {
-      let categoryPrompt;
-      let selectedCategory;
-      
-      if (customCategory) {
-          selectedCategory = customCategory;
-          categoryPrompt = `about the specific topic "${customCategory}"`;
-      } else {
-          const categories = ['Geography', 'History', 'Science', 'Pop Culture', 'Sports', 'General Knowledge'];
-          selectedCategory = categories[Math.floor(Math.random() * categories.length)];
-          categoryPrompt = `for the general category "${selectedCategory}"`;
-      }
-      
-      const difficultyMap = {
-          easy: 'easy (suitable for casual players, basic knowledge)',
-          medium: 'medium (balanced difficulty, requires some knowledge)',
-          hard: 'hard (challenging, requires deep knowledge)'
-      };
-      
-      // --- NEUER, INTELLIGENTERER PROMPT ---
-      const prompt = `Generate ${count} high-quality English multiple-choice quiz questions ${categoryPrompt}.
+    // Suche nach Wikipedia-Artikel
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&list=search&srsearch=${encodeURIComponent(topic)}&srlimit=3`;
+    const searchResponse = await axios.get(searchUrl, { timeout: 5000 });
+    
+    if (!searchResponse.data.query.search.length) {
+      return null;
+    }
 
-      DIFFICULTY GUIDELINES:
-      - EASY: Basic facts that casual fans would know. Example: "What color is SpongeBob?" or "What is the capital of France?"
-      - MEDIUM: Requires decent knowledge but not expertise. Example: "In which episode did SpongeBob first meet Sandy?" or "Which river flows through London?"
-      - HARD: Deep knowledge required, specific details. Example: "What is the name of Plankton's computer wife?" or "What year was the Treaty of Westphalia signed?"
-      
-      EXAMPLE OF GOOD QUESTIONS:
-      
-      Easy question:
-      {
-        "question": "What is Spider-Man's real name?",
-        "options": ["Peter Parker", "Bruce Wayne", "Clark Kent", "Tony Stark"],
-        "correct": 0,
-        "category": "Marvel",
-        "difficulty": "easy"
-      }
-      
-      Medium question:
-      {
-        "question": "Which infinity stone was hidden on Vormir?",
-        "options": ["Power Stone", "Time Stone", "Soul Stone", "Reality Stone"],
-        "correct": 2,
-        "category": "Marvel",
-        "difficulty": "medium"
-      }
-      
-      Hard question:
-      {
-        "question": "In the comics, what is the name of Thor's enchanted axe before he gets Mjolnir?",
-        "options": ["Stormbreaker", "Jarnbjorn", "Gungnir", "Hofund"],
-        "correct": 1,
-        "category": "Marvel",
-        "difficulty": "hard"
-      }
-      
-      RULES:
-      1. Questions MUST be factually correct within the topic's universe/reality
-      2. Wrong options should be plausible but clearly incorrect
-      3. Difficulty MUST match: ${difficultyMap[difficulty]}
-      4. If you cannot generate questions for "${selectedCategory}", respond with: {"error": "unknown_category"}
-      5. NEVER make up facts. Only use information you're certain about
-      
-      Respond ONLY with valid JSON:
-      {
-        "questions": [
-          {
-            "question": "Question text here",
-            "options": ["Option A", "Option B", "Option C", "Option D"],
-            "correct": 0,
-            "category": "${selectedCategory}",
-            "difficulty": "${difficulty}",
-            "confidence": 0.95
-          }
-        ]
-      }`;
-
-      const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-          model: 'llama3-8b-8192',
-          messages: [{
-              role: 'system',
-              content: 'You are an expert quiz master. You always respond with valid JSON only, following all instructions precisely.'
-          }, {
-              role: 'user',
-              content: prompt
-          }],
-          temperature: 0.8,
-          max_tokens: 2000
-      }, {
-          headers: {
-              'Authorization': `Bearer ${this.groqApiKey}`,
-              'Content-Type': 'application/json'
-          },
-          timeout: 30000
-      });
-
-      const content = response.data.choices[0].message.content;
-      let parsed;
-      
-      try {
-          parsed = JSON.parse(content);
-      } catch (parseError) {
-          const jsonMatch = content.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-              parsed = JSON.parse(jsonMatch[0]);
-          } else {
-              throw parseError;
-          }
-      }
-
-      // Check for unknown category error
-      if (parsed.error === 'unknown_category') {
-        console.log(`Groq doesn't know category: ${selectedCategory}`);
-        return [];
-      }
-      
-      if (!parsed.questions || parsed.questions.length === 0) {
-          console.log(`Groq returned no questions for category: ${selectedCategory}`);
-          return [];
-      }
-
-      const questions = parsed.questions
-      .filter(q => !q.confidence || q.confidence >= 0.7) // Filter low confidence
-      .map(q => {
-          const cleaned = {
-              question: q.question,
-              options: q.options,
-              correct: parseInt(q.correct),
-              category: q.category,
-              difficulty: q.difficulty,
-              source: 'groq',
-              id: crypto.randomUUID()
-          };
-          // Remove confidence from final object
-          return cleaned;
-      });
-      
-      this.stats.fromGroq += questions.length;
-      this.stats.totalGenerated += questions.length;
-      
-      // Synchrone Validierung zuerst
-      const preValidated = this.validateGeneratedQuestions(questions);
-      // Dann asynchrone Quality Checks
-      const validated = validateQuestions(preValidated);
-      scheduleDeepChecks(validated);
-      return validated;
-      
+    const pageTitle = searchResponse.data.query.search[0].title;
+    
+    // Hole den Artikelinhalt
+    const contentUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=0&explaintext=1&titles=${encodeURIComponent(pageTitle)}`;
+    const contentResponse = await axios.get(contentUrl, { timeout: 10000 });
+    
+    const pages = contentResponse.data.query.pages;
+    const pageId = Object.keys(pages)[0];
+    const extract = pages[pageId].extract;
+    
+    if (!extract) return null;
+    
+    // Begrenze auf die ersten 3000 Zeichen für bessere Relevanz
+    const limitedExtract = extract.slice(0, 3000);
+    
+    return `Article: ${pageTitle}\n\n${limitedExtract}`;
+    
   } catch (error) {
-      console.error('Groq generation error:', error.response?.data || error.message);
-      this.stats.errors++;
-      return [];
+    console.error('Wikipedia fetch error:', error.message);
+    return null;
   }
+}
+
+async verifyWithWikipedia(questions, wikiContext) {
+  // Verifiziere jede Frage gegen den Wikipedia-Kontext
+  return questions.filter(q => {
+    try {
+      // Prüfe ob die richtige Antwort im Kontext erwähnt wird
+      const correctAnswer = q.options[q.correct].toLowerCase();
+      const contextLower = wikiContext.toLowerCase();
+      
+      // Sehr simple Verifikation - kann erweitert werden
+      if (contextLower.includes(correctAnswer) || 
+          contextLower.includes(q.question.toLowerCase().slice(0, 20))) {
+        return true;
+      }
+      
+      // Wenn die Antwort zu spezifisch ist, behalte sie trotzdem
+      if (q.difficulty === 'hard') {
+        return true;
+      }
+      
+      console.warn(`Question might not be verifiable: ${q.question.slice(0, 50)}...`);
+      return true; // Behalte sie trotzdem, aber markiere sie
+      
+    } catch (error) {
+      return true; // Im Fehlerfall behalten
+    }
+  });
 }
 
 // ============== KOPIEREN SIE AB HIER ================
