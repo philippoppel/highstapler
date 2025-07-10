@@ -48,6 +48,9 @@ const QuizGame = () => {
   
   const [canReportAfterAnswer, setCanReportAfterAnswer] = useState(false);
 
+
+  const [chatMessage, setChatMessage] = useState('');
+const [showChat, setShowChat] = useState(false);
   useEffect(() => {
     // Diese Bedingung verhindert die Animation beim initialen Laden der Seite
     if (gameData.challengerScore > 0 || gameData.moderatorScore > 0) {
@@ -126,6 +129,16 @@ const QuizGame = () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [gameState, gameData.phase, focusLostTime]);
+
+  const sendChatMessage = () => {
+    if (!chatMessage.trim() || !connected) return;
+    
+    socketRef.current.emit('chat-message', { 
+      gameId, 
+      message: chatMessage.trim() 
+    });
+    setChatMessage('');
+  };
 
   // Determines connection quality based on ping
   const getConnectionQuality = () => {
@@ -257,6 +270,13 @@ const QuizGame = () => {
       
       localStorage.setItem('gameId', data.gameId);
       localStorage.setItem('playerName', playerName);
+    });
+
+    socketRef.current.on('chat-message', (data) => {
+      setGameData(prev => ({
+        ...prev,
+        chatMessages: [...(prev.chatMessages || []), data]
+      }));
     });
 
     socketRef.current.on('skip-requested', (data) => {
@@ -482,6 +502,56 @@ const QuizGame = () => {
   };
 
   // --- Render Helper Components ---
+  const renderChat = () => {
+    if (gameState !== 'playing' && gameState !== 'result' && gameState !== 'decision') return null;
+    
+    return (
+      <div className="fixed bottom-4 right-4 z-40">
+        {/* Chat Toggle Button */}
+        <button
+          onClick={() => setShowChat(!showChat)}
+          className="bg-white/20 backdrop-blur-lg rounded-full p-3 text-white hover:bg-white/30 transition-all mb-2"
+        >
+          💬
+        </button>
+        
+        {/* Chat Window */}
+        {showChat && (
+          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 w-80 max-w-[90vw]">
+            {/* Messages */}
+            <div className="h-32 overflow-y-auto mb-3 space-y-2">
+              {(gameData.chatMessages || []).slice(-10).map((msg, index) => (
+                <div key={index} className="text-sm">
+                  <span className="text-blue-400 font-bold">{msg.playerName}: </span>
+                  <span className="text-white">{msg.message}</span>
+                </div>
+              ))}
+            </div>
+            
+            {/* Input */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={chatMessage}
+                onChange={(e) => setChatMessage(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && sendChatMessage()}
+                placeholder="Type message..."
+                maxLength={100}
+                className="flex-1 p-2 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:outline-none text-sm"
+              />
+              <button
+                onClick={sendChatMessage}
+                disabled={!chatMessage.trim()}
+                className="bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm"
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
   const renderConnectionStatus = () => {
     const quality = getConnectionQuality();
     return (
@@ -595,6 +665,7 @@ const QuizGame = () => {
         {renderConnectionStatus()}
         {renderErrorNotification()}
         {renderFocusWarning()}
+        {renderChat()}
         <div className="max-w-md mx-auto pt-8">
           <div className="text-center mb-8 animate-fade-in">
             <h1 className="text-3xl font-bold text-white mb-2">Choose Roles</h1>
@@ -1283,9 +1354,13 @@ const QuizGame = () => {
                     </div>
                   ) : (
                     <>
-                      <button onClick={requestPostAnswerReport} /* ... */>
-                        Report this question as invalid
-                      </button>
+                    <button
+                      onClick={requestPostAnswerReport}
+                      disabled={!connected}
+                      className="text-orange-400 hover:text-orange-200 text-sm underline transition-all"
+                    >
+                      Report this question as invalid
+                    </button>
                       {gameData.postAnswerReportRequests?.length > 0 && (
                         <p className="text-orange-400 text-xs mt-2">
                           {gameData.postAnswerReportRequestedBy} has already reported this question.
