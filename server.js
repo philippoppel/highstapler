@@ -1306,6 +1306,8 @@ socket.on('request-game-update', (data) => {
         return;
       }
 
+      socket.join(gameId);
+
       // Session erstellen
       const { sessionId, reconnectToken } = sessionManager.createSession(
         socket.id, 
