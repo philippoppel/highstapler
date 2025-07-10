@@ -46,7 +46,6 @@ const QuizGame = () => {
   const [focusWarningShown, setFocusWarningShown] = useState(false);
   const [focusLostTime, setFocusLostTime] = useState(null);
   
-  const [canReportAfterAnswer, setCanReportAfterAnswer] = useState(false);
 
   useEffect(() => {
     // Diese Bedingung verhindert die Animation beim initialen Laden der Seite
@@ -1246,6 +1245,36 @@ const QuizGame = () => {
                     <div className="mt-2 flex items-center justify-center gap-2 text-green-400"><TrendingUp className="w-4 h-4" /><span className="text-sm">Coin saved!</span></div>
                   )}
                 </div>
+                {!gameData.roundInvalidated && (
+                <div className="mb-4 bg-white/10 rounded-xl p-4">
+                  {gameData.postAnswerReportRequests?.includes(socketRef.current?.id) ? (
+                    <div className="bg-orange-500/20 rounded-xl p-3 inline-block">
+                      <p className="text-orange-400 text-sm">
+                        You reported this question. Waiting for other player...
+                      </p>
+                      <button onClick={cancelPostAnswerReport} /* ... */>
+                        Cancel report
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <button onClick={requestPostAnswerReport} /* ... */>
+                        Report this question as invalid
+                      </button>
+                      {gameData.postAnswerReportRequests?.length > 0 && (
+                        <p className="text-orange-400 text-xs mt-2">
+                          {gameData.postAnswerReportRequestedBy} has already reported this question.
+                        </p>
+                      )}
+                    </>
+                  )}
+                  {gameData.postAnswerReportRequests?.length === 2 && (
+                    <p className="text-red-400 text-sm mt-2 animate-pulse">
+                      Both players agreed - question invalidated, 0 points for all!
+                    </p>
+                  )}
+                </div>
+              )}
                 <button
                   onClick={nextRound}
                   disabled={!connected}

@@ -1572,21 +1572,21 @@ socket.on('choose-role', (data) => {
 });
 
 // Post-Answer Report Request
-// Post-Answer Report Request
 socket.on('request-post-answer-report', (data) => {
   try {
     console.log('POST-ANSWER REPORT REQUEST:', data);
     const { gameId, reason } = data;
     const game = gameManager.getGame(gameId);
     
-    if (!game || game.state !== 'playing' || game.phase !== 'decision') {
+    // Prüfen, ob die Aktion in der richtigen Phase stattfindet ('result')
+    if (!game || game.state !== 'playing' || game.phase !== 'result') {
       return;
     }
     
     const player = game.players.find(p => p.id === socket.id);
     if (!player) return;
     
-    // Verhindert doppelte Meldungen
+    // Doppelte Meldungen verhindern
     if (game.postAnswerReportRequests.includes(socket.id)) {
       return;
     }
@@ -1594,54 +1594,59 @@ socket.on('request-post-answer-report', (data) => {
     game.postAnswerReportRequests.push(socket.id);
     game.postAnswerReportRequestedBy = player.name;
     
-    // Benachrichtige den anderen Spieler über die Meldung
     socket.to(gameId).emit('post-answer-report-requested', { 
       playerName: player.name,
       reason 
     });
     
-    // **START DER KORREKTUR**
     // Wenn beide Spieler die Frage melden
     if (game.postAnswerReportRequests.length === 2) {
-      console.log('Both players agreed to invalidate question - 0 points for all');
+      console.log('Both players agreed to invalidate question in result phase.');
       
       const currentQ = game.questions[game.currentQuestion];
       if (currentQ) {
         currentQ.reported = true;
-        currentQ.reportReason = 'Invalid question - both players agreed';
+        currentQ.reportReason = 'Invalid question - agreed by both in result phase';
       }
 
       const updates = {
-        phase: 'result',
-        roundResult: 'Question reported as invalid by both players. No points awarded.',
+        roundResult: 'Question invalidated by both players. Points for this round have been revoked.',
         postAnswerReportRequests: [],
         postAnswerReportRequestedBy: null,
-        showModeratorAnswer: true,
-        decision: 'invalidated'
+        roundInvalidated: true // NEUES FLAG, um die Melde-UI zu deaktivieren
       };
       
-      // WICHTIG: Ziehe den Punkt zurück, den der Challenger eventuell schon bekommen hat.
-      // Der Punkt für den Moderator wird erst in 'make-decision' vergeben, was hier übersprungen wird.
+      // === PUNKTE ZURÜCKNEHMEN ===
+      // 1. Challenger-Punkt zurücknehmen, falls er einen für die richtige Antwort bekam.
       if (game.challengerCorrect) {
         updates.challengerScore = game.challengerScore - 1;
-        console.log(`Reverted challenger score for game ${gameId} from ${game.challengerScore} to ${updates.challengerScore}`);
+        console.log(`Reverted challenger score for game ${gameId}`);
       }
       
-      // Spiel mit den Korrekturen aktualisieren
+      // 2. Moderator-Punkt zurücknehmen, falls er einen bekam.
+      const moderatorCorrect = parseInt(game.moderatorAnswer) === currentQ.correct;
+      // Fall A: Moderator wurde vertraut
+      if (game.decision === 'trust') {
+        updates.moderatorScore = game.moderatorScore - 1;
+        console.log(`Reverted moderator score (trust) for game ${gameId}`);
+      } 
+      // Fall B: Moderator hatte bei "doubt" recht
+      else if (game.decision === 'doubt' && moderatorCorrect) {
+        updates.moderatorScore = game.moderatorScore - 1;
+        console.log(`Reverted moderator score (correct doubt) for game ${gameId}`);
+      }
+      
       gameManager.updateGame(gameId, updates);
       
-      // Den finalen, korrigierten Spielzustand holen und an alle senden
       const updatedGame = gameManager.getGame(gameId);
-      
       io.to(gameId).emit('question-invalidated', { reason });
       io.to(gameId).emit('game-updated', updatedGame);
 
     } else {
-      // Wenn nur ein Spieler gemeldet hat, nur den Zustand aktualisieren
+      // Nur den Zustand mit der ersten Meldung aktualisieren
       gameManager.updateGame(gameId, {});
       io.to(gameId).emit('game-updated', game);
     }
-    // **ENDE DER KORREKTUR**
 
   } catch (error) {
     handleSocketError(socket, error, 'request-post-answer-report');
@@ -1775,6 +1780,7 @@ socket.on('next-round', async (data) => {
       updates.skipRequestedBy = null;
       updates.postAnswerReportRequests = []; // NEW
       updates.postAnswerReportRequestedBy = null; // NEW
+      updates.roundInvalidated = false; // <--- DIESE ZEILE HINZUFÜGEN
     }
 
     // Update game and notify all clients
