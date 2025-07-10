@@ -283,7 +283,7 @@ class GameManager {
     
     // Assign roles if there are 2 players
     if (game.players.length === 2) {
-      this.assignRoles(game);
+      game.state = 'role-selection';
     }
 
     game.lastActivity = Date.now();
