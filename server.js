@@ -1715,27 +1715,36 @@ socket.on('next-round', async (data) => {
     let updates = {};
     
     // Check win conditions BEFORE updating anything
-    const challengerWon = game.challengerScore >= 5;
-    const moderatorWon = game.moderatorScore >= 5;
+    const challengerReached5 = game.challengerScore >= 5;
+    const moderatorReached5 = game.moderatorScore >= 5;
     const challengerOutOfCoins = game.challengerCoins <= 0;
     
-    const gameFinished = challengerWon || moderatorWon || challengerOutOfCoins;
+    // Check if both reached 5 - if yes, higher score wins
+    let gameFinished = false;
+    let winner = null;
     
-    if (gameFinished) {
-      // Determine winner based on the specific win condition
-      let winner;
-      if (challengerWon) {
+    if (challengerOutOfCoins) {
+      gameFinished = true;
+      winner = game.moderatorName;
+    } else if (challengerReached5 && moderatorReached5) {
+      // Both have 5+ points - check who has more
+      if (game.challengerScore > game.moderatorScore) {
+        gameFinished = true;
         winner = game.challengerName;
-      } else if (moderatorWon) {
+      } else if (game.moderatorScore > game.challengerScore) {
+        gameFinished = true;
         winner = game.moderatorName;
-      } else if (challengerOutOfCoins) {
-        winner = game.moderatorName; // Moderator wins if challenger runs out of coins
-      } else if (game.challengerScore === game.moderatorScore) {
-        winner = 'Unentschieden'; // Draw
-      } else {
-        // Fallback: highest score wins
-        winner = game.challengerScore > game.moderatorScore ? game.challengerName : game.moderatorName;
       }
+      // If equal, game continues
+    } else if (challengerReached5 && !moderatorReached5) {
+      gameFinished = true;
+      winner = game.challengerName;
+    } else if (moderatorReached5 && !challengerReached5) {
+      gameFinished = true;
+      winner = game.moderatorName;
+    }
+    
+    if (gameFinished && winner) {
       
       updates.state = 'finished';
       updates.winner = winner;

@@ -46,6 +46,7 @@ const QuizGame = () => {
   const [focusWarningShown, setFocusWarningShown] = useState(false);
   const [focusLostTime, setFocusLostTime] = useState(null);
   
+  const [canReportAfterAnswer, setCanReportAfterAnswer] = useState(false);
 
   useEffect(() => {
     // Diese Bedingung verhindert die Animation beim initialen Laden der Seite
@@ -1293,7 +1294,7 @@ const QuizGame = () => {
   // Finished Screen
   if (gameState === 'finished') {
     const isWinner = gameData.winner === (gameRole === 'challenger' ? gameData.challengerName : gameData.moderatorName);
-    const isDraw = gameData.winner === 'Unentschieden' || gameData.challengerScore === gameData.moderatorScore;
+    const isDraw = false;
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4 relative overflow-hidden">
