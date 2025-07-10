@@ -231,7 +231,9 @@ class GameManager {
       lastActivity: Date.now(),
       version: 1,
       skipRequests: [],
-skipRequestedBy: null
+      skipRequestedBy: null,
+      postAnswerReportRequests: [], // NEW
+      postAnswerReportRequestedBy: null // NEW
     };
   
     this.games.set(gameId, game);
@@ -566,42 +568,45 @@ async generateWithGroq(count, difficulty = 'medium', customCategory = null) {
     }
 
     const difficultyMap = {
-      easy: 'easy (basic facts that anyone could know)',
-      medium: 'medium (requires some knowledge)',
-      hard: 'hard (detailed knowledge required)'
+      easy: 'easy (basic facts clearly stated in the text, like names, locations, or simple facts)',
+      medium: 'medium (requires connecting 2-3 pieces of information from the text)',
+      hard: 'hard (specific details, dates, numbers, or information that requires careful reading)'
     };
-
-    // Schritt 2: Fragen basierend auf Wikipedia-Kontext generieren
+    
+    // Erweitere den Prompt mit besseren Schwierigkeits-Beispielen
     const prompt = `Based on the following Wikipedia information, generate ${count} multiple-choice quiz questions.
-
-WIKIPEDIA CONTEXT:
-${wikiContext}
-
-REQUIREMENTS:
-1. Questions MUST be based ONLY on the information provided above
-2. All questions must be factually correct according to the Wikipedia text
-3. Difficulty level: ${difficultyMap[difficulty]}
-4. Each question must have 4 options with only 1 correct answer
-5. Wrong options should be plausible but clearly incorrect based on the text
-6. Do NOT make up any facts not present in the Wikipedia context
-
-DIFFICULTY EXAMPLES:
-- Easy: Basic facts mentioned directly in the text
-- Medium: Requires understanding connections between facts
-- Hard: Specific details or dates from the text
-
-Respond ONLY with valid JSON:
-{
-  "questions": [
+    
+    WIKIPEDIA CONTEXT:
+    ${wikiContext}
+    
+    DIFFICULTY LEVEL: ${difficulty.toUpperCase()}
+    ${difficultyMap[difficulty]}
+    
+    DIFFICULTY GUIDELINES BASED ON THE TEXT:
+    - EASY: Ask about main topics, names, or facts that are explicitly stated. Example: "What is X?" when X is clearly defined in the text.
+    - MEDIUM: Ask about relationships, causes, or facts that require reading 2-3 sentences. Example: "Why did X happen?" when the cause is explained across multiple sentences.
+    - HARD: Ask about specific details, exact dates, percentages, or information mentioned only once. Example: "In which year...?" or "What percentage...?"
+    
+    IMPORTANT RULES:
+    1. Questions MUST be answerable using ONLY the Wikipedia text above
+    2. Difficulty must match the ${difficulty} level as described
+    3. For EASY questions, the answer should be directly findable in a single sentence
+    4. For MEDIUM questions, the answer might require understanding a paragraph
+    5. For HARD questions, look for specific details that a casual reader might miss
+    6. All wrong options must be plausible but clearly wrong based on the text
+    
+    Respond ONLY with valid JSON:
     {
-      "question": "Question text here",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correct": 0,
-      "category": "${customCategory || 'General Knowledge'}",
-      "difficulty": "${difficulty}"
-    }
-  ]
-}`;
+      "questions": [
+        {
+          "question": "Question text here",
+          "options": ["Option A", "Option B", "Option C", "Option D"],
+          "correct": 0,
+          "category": "${customCategory || 'General Knowledge'}",
+          "difficulty": "${difficulty}"
+        }
+      ]
+    }`;
 
     const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
       model: 'llama3-8b-8192',
@@ -658,9 +663,12 @@ Respond ONLY with valid JSON:
     
     // Verifiziere Antworten gegen Wikipedia
     const verifiedQuestions = await this.verifyWithWikipedia(validated, wikiContext);
-    
-    scheduleDeepChecks(verifiedQuestions);
-    return verifiedQuestions;
+
+    // Validiere und korrigiere Schwierigkeitsgrade
+    const difficultyValidated = this.validateDifficultyLevel(verifiedQuestions, wikiContext);
+
+    scheduleDeepChecks(difficultyValidated);
+    return difficultyValidated;
 
   } catch (error) {
     console.error('Groq generation error:', error.response?.data || error.message);
@@ -729,6 +737,40 @@ async verifyWithWikipedia(questions, wikiContext) {
     } catch (error) {
       return true; // Im Fehlerfall behalten
     }
+  });
+}
+
+validateDifficultyLevel(questions, wikiContext) {
+  return questions.map(q => {
+    const contextWords = wikiContext.toLowerCase().split(/\s+/);
+    const questionWords = q.question.toLowerCase().split(/\s+/);
+    const correctAnswer = q.options[q.correct].toLowerCase();
+    
+    // Zähle wie oft die Antwort im Text vorkommt
+    const answerMentions = contextWords.filter(word => 
+      correctAnswer.includes(word) || word.includes(correctAnswer)
+    ).length;
+    
+    // Zähle wie spezifisch die Frage ist (längere Fragen = spezifischer)
+    const questionSpecificity = questionWords.length;
+    
+    // Passe Schwierigkeit basierend auf Metriken an
+    let suggestedDifficulty = q.difficulty;
+    
+    if (answerMentions > 5 && questionSpecificity < 8) {
+      suggestedDifficulty = 'easy';
+    } else if (answerMentions === 1 || questionSpecificity > 15) {
+      suggestedDifficulty = 'hard';
+    } else {
+      suggestedDifficulty = 'medium';
+    }
+    
+    if (suggestedDifficulty !== q.difficulty) {
+      console.log(`Difficulty adjusted for question: "${q.question.slice(0,50)}..." from ${q.difficulty} to ${suggestedDifficulty}`);
+      q.difficulty = suggestedDifficulty;
+    }
+    
+    return q;
   });
 }
 
@@ -1339,9 +1381,7 @@ socket.on('create-game', async (data) => {
           challengerScore: challengerCorrect ? game.challengerScore + 1 : game.challengerScore,
           phase: 'decision'
         });
-        
-        console.log('Both answered, moving to decision phase');
-      }
+              }
 
       io.to(gameId).emit('game-updated', game);
     } catch (error) {
@@ -1388,8 +1428,6 @@ socket.on('create-game', async (data) => {
 
       updates.roundResult = roundResult;
       gameManager.updateGame(gameId, updates);
-
-      console.log('Decision made:', decision, 'Result:', roundResult);
       io.to(gameId).emit('game-updated', game);
     } catch (error) {
       handleSocketError(socket, error, 'make-decision');
@@ -1459,6 +1497,90 @@ socket.on('request-skip', (data) => {
   }
 });
 
+// Post-Answer Report Request
+socket.on('request-post-answer-report', (data) => {
+  try {
+    console.log('POST-ANSWER REPORT REQUEST:', data);
+    const { gameId, reason } = data;
+    const game = gameManager.getGame(gameId);
+    
+    if (!game || game.state !== 'playing' || game.phase !== 'decision') {
+      return;
+    }
+    
+    const player = game.players.find(p => p.id === socket.id);
+    if (!player) return;
+    
+    // Check if player already requested report
+    if (game.postAnswerReportRequests.includes(socket.id)) {
+      return;
+    }
+    
+    game.postAnswerReportRequests.push(socket.id);
+    game.postAnswerReportRequestedBy = player.name;
+    
+    // Notify other player
+    socket.to(gameId).emit('post-answer-report-requested', { 
+      playerName: player.name,
+      reason 
+    });
+    
+    // If both players want to report, invalidate the question
+    if (game.postAnswerReportRequests.length === 2) {
+      console.log('Both players agreed to invalidate question - 0 points for all');
+      
+      // Mark question as invalid
+      const currentQ = game.questions[game.currentQuestion];
+      if (currentQ) {
+        currentQ.reported = true;
+        currentQ.reportReason = 'Invalid question - both players agreed';
+      }
+      
+      // Reset scores to what they were before this question
+      // No points awarded to anyone
+      gameManager.updateGame(gameId, {
+        phase: 'result',
+        roundResult: 'Question reported as invalid by both players. No points awarded.',
+        postAnswerReportRequests: [],
+        postAnswerReportRequestedBy: null,
+        showModeratorAnswer: true // Show the moderator's answer anyway
+      });
+      
+      io.to(gameId).emit('question-invalidated', { reason });
+      io.to(gameId).emit('game-updated', game);
+    } else {
+      gameManager.updateGame(gameId, {});
+      io.to(gameId).emit('game-updated', game);
+    }
+  } catch (error) {
+    handleSocketError(socket, error, 'request-post-answer-report');
+  }
+});
+
+// Cancel Post-Answer Report Request
+socket.on('cancel-post-answer-report', (data) => {
+  try {
+    console.log('CANCEL POST-ANSWER REPORT:', data);
+    const { gameId } = data;
+    const game = gameManager.getGame(gameId);
+    
+    if (!game) return;
+    
+    // Remove player from post-answer report requests
+    game.postAnswerReportRequests = game.postAnswerReportRequests.filter(id => id !== socket.id);
+    
+    if (game.postAnswerReportRequests.length === 0) {
+      game.postAnswerReportRequestedBy = null;
+    }
+    
+    gameManager.updateGame(gameId, {});
+    
+    io.to(gameId).emit('post-answer-report-cancelled');
+    io.to(gameId).emit('game-updated', game);
+  } catch (error) {
+    handleSocketError(socket, error, 'cancel-post-answer-report');
+  }
+});
 // Cancel Skip Request
 socket.on('cancel-skip', (data) => {
   try {
@@ -1488,72 +1610,94 @@ socket.on('cancel-skip', (data) => {
 // Durch diesen kompletten Block ersetzen
 socket.on('next-round', async (data) => {
   try {
-      console.log('NEXT ROUND:', data);
-      const { gameId } = data;
-      const game = gameManager.getGame(gameId);
+    console.log('NEXT ROUND:', data);
+    const { gameId } = data;
+    const game = gameManager.getGame(gameId);
 
-      if (!game) return;
+    if (!game) return;
 
-      let updates = {};
-      const gameFinished =
-      game.challengerScore >= 5 ||
-      game.moderatorScore  >= 5 ||
-      game.challengerCoins <= 0;
+    let updates = {};
+    
+    // Check win conditions BEFORE updating anything
+    const challengerWon = game.challengerScore >= 5;
+    const moderatorWon = game.moderatorScore >= 5;
+    const challengerOutOfCoins = game.challengerCoins <= 0;
+    
+    const gameFinished = challengerWon || moderatorWon || challengerOutOfCoins;
     
     if (gameFinished) {
-      updates.state   = 'finished';
-      updates.winner  = (game.challengerScore >= 5) ? game.challengerName : game.moderatorName;
-      updates.endTime = Date.now();  
-          if (game.challengerScore >= 5) {
-              updates.winner = game.challengerName;
-          } else {
-              updates.winner = game.moderatorName;
-          }
-          updates.state = 'finished';
-
-          // Sessions für das beendete Spiel aufräumen
-          const sessions = sessionManager.findSessionsByGame(gameId);
-          sessions.forEach(session => {
-              sessionManager.deleteSession(session.id);
-          });
-
-          // Das Spielobjekt nach einer kurzen Verzögerung löschen
-          setTimeout(() => {
-              gameManager.deleteGame(gameId);
-          }, 5000);
-
+      // Determine winner based on the specific win condition
+      let winner;
+      if (challengerWon) {
+        winner = game.challengerName;
+      } else if (moderatorWon) {
+        winner = game.moderatorName;
+      } else if (challengerOutOfCoins) {
+        winner = game.moderatorName; // Moderator wins if challenger runs out of coins
+      } else if (game.challengerScore === game.moderatorScore) {
+        winner = 'Unentschieden'; // Draw
       } else {
-          // Nächste Runde vorbereiten
-          updates.currentQuestion = game.currentQuestion + 1;
-
-          // Bei Bedarf neue Fragen nachladen
-          if (game.currentQuestion >= game.questions.length - 5) {
-              const newQuestions = await questionService.getQuestions(10, gameId, game.settings);
-              game.questions.push(...newQuestions);
-              console.log(`${newQuestions.length} neue Fragen zum Spiel ${gameId} hinzugefügt`);
-          }
-
-          // Status für die neue Runde zurücksetzen
-          updates.phase = 'answering';
-          updates.challengerAnswer = '';
-          updates.moderatorAnswer = '';
-          updates.challengerAnswered = false;
-          updates.moderatorAnswered = false;
-          updates.challengerCorrect = false;
-          updates.decision = '';
-          updates.roundResult = '';
-          updates.showModeratorAnswer = false;
-          updates.skipRequests = []; // Korrekte Position
-          updates.skipRequestedBy = null; // Korrekte Position
+        // Fallback: highest score wins
+        winner = game.challengerScore > game.moderatorScore ? game.challengerName : game.moderatorName;
       }
+      
+      updates.state = 'finished';
+      updates.winner = winner;
+      updates.endTime = Date.now();
+      
+      console.log(`Game ${gameId} finished! Winner: ${winner}`);
+      console.log(`Final Score - ${game.challengerName}: ${game.challengerScore}, ${game.moderatorName}: ${game.moderatorScore}`);
+      console.log(`Challenger coins left: ${game.challengerCoins}`);
+      
+      // Clean up sessions after a delay (but don't delete immediately)
+      setTimeout(() => {
+        const sessions = sessionManager.findSessionsByGame(gameId);
+        sessions.forEach(session => {
+          sessionManager.deleteSession(session.id);
+        });
+        gameManager.deleteGame(gameId);
+        console.log(`Game ${gameId} and sessions cleaned up`);
+      }, 60000); // 1 minute delay to allow players to see the result
+      
+    } else {
+      // Continue to next round
+      updates.currentQuestion = game.currentQuestion + 1;
+      
+      // Load more questions if needed
+      if (game.currentQuestion >= game.questions.length - 5) {
+        const newQuestions = await questionService.getQuestions(10, gameId, game.settings);
+        game.questions.push(...newQuestions);
+        console.log(`${newQuestions.length} new questions added to game ${gameId}`);
+      }
+      
+      // Reset for new round
+      updates.phase = 'answering';
+      updates.challengerAnswer = '';
+      updates.moderatorAnswer = '';
+      updates.challengerAnswered = false;
+      updates.moderatorAnswered = false;
+      updates.challengerCorrect = false;
+      updates.decision = '';
+      updates.roundResult = '';
+      updates.showModeratorAnswer = false;
+      updates.skipRequests = [];
+      updates.skipRequestedBy = null;
+      updates.postAnswerReportRequests = []; // NEW
+      updates.postAnswerReportRequestedBy = null; // NEW
+    }
 
-      // Spielzustand aktualisieren und an alle Clients senden
-      gameManager.updateGame(gameId, updates);
-      console.log('Next round - Question:', game.currentQuestion, 'State:', game.state);
-      io.to(gameId).emit('game-updated', game);
+    // Update game and notify all clients
+    gameManager.updateGame(gameId, updates);
+    io.to(gameId).emit('game-updated', game);
+    
+    if (gameFinished) {
+      console.log(`Broadcasting game finished for ${gameId}`);
+    } else {
+      console.log(`Next round - Question: ${game.currentQuestion}, State: ${game.state}`);
+    }
 
   } catch (error) {
-      handleSocketError(socket, error, 'next-round');
+    handleSocketError(socket, error, 'next-round');
   }
 });
 
