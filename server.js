@@ -1382,8 +1382,10 @@ socket.on('request-game-update', (data) => {
       const player = game.players.find(p => p.id === socket.id);
       if (!player) return;
   
-      // Determine which player answered
+      // A single object to hold all updates for this action
       const updates = {};
+  
+      // 1. Record the answer
       if (socket.id === game.challengerId) {
         updates.challengerAnswer = answer;
         updates.challengerAnswered = true;
@@ -1391,36 +1393,25 @@ socket.on('request-game-update', (data) => {
         updates.moderatorAnswer = answer;
         updates.moderatorAnswered = true;
       } else {
-        return; // Player is not part of this game's roles
+        return; // Not a participant
       }
   
-      // --- Start of Robust Logic ---
-      // 1. Apply the first update (the player's answer)
-      gameManager.updateGame(gameId, updates);
+      // Temporarily apply the update to the current game object to check the next condition
+      const tempGame = { ...game, ...updates };
   
-      // 2. Get the game object *after* the update to check its new state
-      const gameAfterUpdate = gameManager.getGame(gameId);
+      // 2. If both players have now answered, calculate the result and change the phase
+      if (tempGame.challengerAnswered && tempGame.moderatorAnswered) {
+        const currentQ = tempGame.questions[tempGame.currentQuestion];
+        const challengerCorrect = parseInt(tempGame.challengerAnswer) === currentQ.correct;
   
-      // 3. Check if the condition to proceed (both answered) is now met
-      if (gameAfterUpdate.challengerAnswered && gameAfterUpdate.moderatorAnswered) {
-        const currentQ = gameAfterUpdate.questions[gameAfterUpdate.currentQuestion];
-        const challengerCorrect = parseInt(gameAfterUpdate.challengerAnswer) === currentQ.correct;
-        
-        // 4. Prepare the NEXT set of updates
-        const nextPhaseUpdates = {
-          challengerCorrect,
-          challengerScore: challengerCorrect ? gameAfterUpdate.challengerScore + 1 : gameAfterUpdate.challengerScore,
-          phase: 'decision'
-        };
-        
-        // 5. Apply the second update to move to the decision phase
-        gameManager.updateGame(gameId, nextPhaseUpdates);
+        updates.challengerCorrect = challengerCorrect;
+        updates.challengerScore = challengerCorrect ? tempGame.challengerScore + 1 : tempGame.challengerScore;
+        updates.phase = 'decision';
       }
   
-      // 6. Get the absolute final game state and emit it ONCE to all players.
-      const finalGame = gameManager.getGame(gameId);
+      // 3. Apply all collected updates in one go and emit the result
+      const finalGame = gameManager.updateGame(gameId, updates);
       io.to(gameId).emit('game-updated', finalGame);
-      // --- End of Robust Logic ---
   
     } catch (error) {
       handleSocketError(socket, error, 'submit-answer');

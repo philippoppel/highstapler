@@ -261,62 +261,46 @@ const QuizGame = () => {
       setMyAnswered(false);
     });
 
-    socketRef.current.on('game-updated', (game) => {  
-      setIsJoining(false);  
-      if (gameData.challengerScore !== undefined && game.challengerScore > gameData.challengerScore) {
+    socketRef.current.on('game-updated', (newGameData) => {
+      // Log to see what the server is sending
+      console.log('Received game-updated with new data:', newGameData);
+ 
+      // --- 1. Directly update the main game data ---
+      setGameData(newGameData);
+      setGameState(newGameData.state);
+ 
+      // --- 2. Update player-specific roles ---
+      const myPlayer = newGameData.players?.find(p => p.id === socketRef.current.id);
+      if (myPlayer?.gameRole) {
+        setGameRole(myPlayer.gameRole);
+      }
+ 
+      // --- 3. Reset UI for a new round ---
+      // This logic correctly resets the view when the phase changes back to 'answering'
+      const isNewAnsweringPhase = newGameData.phase === 'answering' && !newGameData.challengerAnswered && !newGameData.moderatorAnswered;
+      if (isNewAnsweringPhase) {
+        setMyAnswer('');
+        setMyAnswered(false);
+        setWantToSkip(false);
+        setSkipRequested(false);
+        setCanReportAfterAnswer(false);
+      }
+ 
+      // --- 4. Handle animations based on the new data ---
+      // This should be done in a useEffect hook that watches for changes in `gameData`
+    });
+ 
+    // Add a new useEffect to handle animations when gameData changes
+    useEffect(() => {
+      if (gameData.challengerScore > 0) { // Add a condition to prevent animation on initial load
         setAnimateScore(true);
         setTimeout(() => setAnimateScore(false), 1000);
       }
-      if (gameData.challengerCoins !== undefined && game.challengerCoins !== gameData.challengerCoins) {
-        setAnimateCoins(true);
-        setTimeout(() => setAnimateCoins(false), 1000);
+      if (gameData.challengerCoins !== gameData.initialCoins) { // Compare against initial value
+         setAnimateCoins(true);
+         setTimeout(() => setAnimateCoins(false), 1000);
       }
-    
-      setGameData(prevGameData => {
-        // Animationen nur wenn sich Werte ändern
-        if (prevGameData.challengerScore !== undefined && game.challengerScore > prevGameData.challengerScore) {
-          setAnimateScore(true);
-          setTimeout(() => setAnimateScore(false), 1000);
-        }
-        if (prevGameData.challengerCoins !== undefined && game.challengerCoins !== prevGameData.challengerCoins) {
-          setAnimateCoins(true);
-          setTimeout(() => setAnimateCoins(false), 1000);
-        }
-        
-        return game;
-      });
-      
-      setGameState(game.state);
-    
-      const myPlayer = game.players?.find(p => p.id === socketRef.current.id);
-      if (myPlayer?.gameRole) setGameRole(myPlayer.gameRole);
-      
-      if (game.phase === 'answering' && !game.challengerAnswered && !game.moderatorAnswered) {
-        setMyAnswer('');
-        setMyAnswered(false);
-        setCanReportAfterAnswer(false);
-        setWantToSkip(false);
-        setSkipRequested(false);
-      }
-      
-      // Enable reporting after both players answered
-      if (game.phase === 'decision' && game.challengerAnswered && game.moderatorAnswered) {
-        setCanReportAfterAnswer(true);
-      }
-      
-      if (game.phase === 'result' && prevGameData.phase === 'decision') {
-        setShowDecisionAnimation(true);
-        setTimeout(() => setShowDecisionAnimation(false), 2000);
-      }
-      if (game.phase === 'answering' && !game.challengerAnswered && !game.moderatorAnswered) {
-        setMyAnswer('');
-        setMyAnswered(false);
-        setWantToSkip(false);
-        setSkipRequested(false);
-        setCanReportAfterAnswer(false);
-        setPostAnswerReportRequested(false);
-      }
-    });
+    }, [gameData.challengerScore, gameData.challengerCoins]); // Dependencies
     
     
     socketRef.current.on('question-invalidated', (data) => {
