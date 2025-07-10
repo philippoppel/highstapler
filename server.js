@@ -292,27 +292,52 @@ class GameManager {
     return game;
   }
 
-  assignRoles(game) {
+  assignRoles(game, hostChoice = null) {
     if (game.players.length !== 2) return;
-
-    // Randomly assign roles
-    if (Math.random() < 0.5) {
-      game.challengerName = game.players[0].name;
-      game.moderatorName = game.players[1].name;
-      game.challengerId = game.players[0].id;
-      game.moderatorId = game.players[1].id;
-      game.players[0].gameRole = 'challenger';
-      game.players[1].gameRole = 'moderator';
+  
+    const hostPlayer = game.players.find(p => p.isHost);
+    const otherPlayer = game.players.find(p => !p.isHost);
+  
+    if (!hostPlayer || !otherPlayer) {
+      console.error('Could not find host or other player');
+      return;
+    }
+  
+    if (hostChoice === 'random') {
+      hostChoice = Math.random() < 0.5 ? 'challenger' : 'moderator';
+    }
+  
+    if (hostChoice === 'challenger') {
+      game.challengerName = hostPlayer.name;
+      game.moderatorName = otherPlayer.name;
+      game.challengerId = hostPlayer.id;
+      game.moderatorId = otherPlayer.id;
+      hostPlayer.gameRole = 'challenger';
+      otherPlayer.gameRole = 'moderator';
+    } else if (hostChoice === 'moderator') {
+      game.challengerName = otherPlayer.name;
+      game.moderatorName = hostPlayer.name;
+      game.challengerId = otherPlayer.id;
+      game.moderatorId = hostPlayer.id;
+      hostPlayer.gameRole = 'moderator';
+      otherPlayer.gameRole = 'challenger';
     } else {
-      game.challengerName = game.players[1].name;
-      game.moderatorName = game.players[0].name;
-      game.challengerId = game.players[1].id;
-      game.moderatorId = game.players[0].id;
-      game.players[1].gameRole = 'challenger';
-      game.players[0].gameRole = 'moderator';
+      // Default: Host ist Challenger
+      game.challengerName = hostPlayer.name;
+      game.moderatorName = otherPlayer.name;
+      game.challengerId = hostPlayer.id;
+      game.moderatorId = otherPlayer.id;
+      hostPlayer.gameRole = 'challenger';
+      otherPlayer.gameRole = 'moderator';
     }
     
     game.state = 'setup';
+    game.rolesAssigned = true;
+    
+    console.log('Roles assigned:', {
+      challenger: game.challengerName + ' (ID: ' + game.challengerId + ')',
+      moderator: game.moderatorName + ' (ID: ' + game.moderatorId + ')'
+    });
   }
 
   removePlayerFromGame(gameId, playerId) {
@@ -1196,14 +1221,26 @@ socket.on('create-game', async (data) => {
       handleSocketError(socket, error, 'create-game');
   }
 });
-
+socket.on('request-game-update', (data) => {
+  try {
+    const { gameId } = data;
+    const game = gameManager.getGame(gameId);
+    
+    if (game) {
+      socket.emit('game-updated', game);
+      console.log('Manual game update requested for:', gameId);
+    }
+  } catch (error) {
+    console.error('Error in request-game-update:', error);
+  }
+});
   // Spiel beitreten
   socket.on('join-game', async (data) => {
     try {
       console.log('JOIN GAME:', data);
       const { gameId, playerName } = data;
       const game = gameManager.getGame(gameId);
-
+  
       if (!game) {
         console.log('Game not found:', gameId);
         socket.emit('error', { message: 'Game not found!' });
@@ -1278,12 +1315,6 @@ socket.on('create-game', async (data) => {
         false
       );
 
-      socket.join(gameId);
-
-      // Update an alle Spieler senden
-      io.to(gameId).emit('game-updated', updatedGame);
-      
-      // Dem beitretenden Spieler seine Rolle mitteilen
       const joinedPlayer = updatedGame.players.find(p => p.id === socket.id);
       socket.emit('joined-game', { 
         gameId, 
@@ -1294,10 +1325,14 @@ socket.on('create-game', async (data) => {
         reconnectToken
       });
 
-      console.log('Player joined:', playerName, 'to game:', gameId);
-    } catch (error) {
-      handleSocketError(socket, error, 'join-game');
-    }
+          // DANN sende game-updated an ALLE (inklusive dem neuen Spieler)
+    io.to(gameId).emit('game-updated', updatedGame);
+
+    console.log('Player joined:', playerName, 'to game:', gameId);
+    console.log('Current players:', updatedGame.players.map(p => p.name));
+  } catch (error) {
+    handleSocketError(socket, error, 'join-game');
+  }
   });
 
   // Spiel starten
@@ -1344,8 +1379,8 @@ socket.on('create-game', async (data) => {
       const { gameId, answer } = data;
       const game = gameManager.getGame(gameId);
       
-      if (!game) {
-        console.log('Game not found for answer:', gameId);
+      if (!game || game.state !== 'playing') {
+        console.log('Game not found or not playing:', gameId);
         return;
       }
       
@@ -1354,36 +1389,46 @@ socket.on('create-game', async (data) => {
         console.log('Player not found:', socket.id);
         return;
       }
-
+  
       console.log('Player role:', player.gameRole, 'Answer:', answer);
-
+  
       const updates = {};
-
-      if (player.gameRole === 'challenger' || (player.isHost && game.challengerId === socket.id)) {
+  
+      // Korrigiere die Logik für die Spielerzuordnung
+      if (socket.id === game.challengerId) {
         updates.challengerAnswer = answer;
         updates.challengerAnswered = true;
         console.log('Challenger answered');
-      } else if (player.gameRole === 'moderator' || (player.isHost && game.moderatorId === socket.id)) {
+      } else if (socket.id === game.moderatorId) {
         updates.moderatorAnswer = answer;
         updates.moderatorAnswered = true;
         console.log('Moderator answered');
+      } else {
+        console.error('Player has no valid game role:', player);
+        return;
       }
-
+  
+      // Update das Spiel ZUERST
       gameManager.updateGame(gameId, updates);
-
-      // Prüfen ob beide geantwortet haben
-      if (game.challengerAnswered && game.moderatorAnswered) {
-        const currentQ = game.questions[game.currentQuestion];
-        const challengerCorrect = parseInt(game.challengerAnswer) === currentQ.correct;
+  
+      // DANN prüfe auf dem aktualisierten game Objekt
+      const updatedGame = gameManager.getGame(gameId);
+      
+      if (updatedGame.challengerAnswered && updatedGame.moderatorAnswered) {
+        const currentQ = updatedGame.questions[updatedGame.currentQuestion];
+        const challengerCorrect = parseInt(updatedGame.challengerAnswer) === currentQ.correct;
         
         gameManager.updateGame(gameId, {
           challengerCorrect,
-          challengerScore: challengerCorrect ? game.challengerScore + 1 : game.challengerScore,
+          challengerScore: challengerCorrect ? updatedGame.challengerScore + 1 : updatedGame.challengerScore,
           phase: 'decision'
         });
-              }
-
-      io.to(gameId).emit('game-updated', game);
+      }
+  
+      // Sende das finale Update
+      const finalGame = gameManager.getGame(gameId);
+      io.to(gameId).emit('game-updated', finalGame);
+      
     } catch (error) {
       handleSocketError(socket, error, 'submit-answer');
     }
@@ -1396,39 +1441,51 @@ socket.on('create-game', async (data) => {
       const { gameId, decision } = data;
       const game = gameManager.getGame(gameId);
       
-      if (!game) return;
+      if (!game || game.state !== 'playing' || game.phase !== 'decision') {
+        console.log('Invalid game state for decision');
+        return;
+      }
       
-      const player = game.players.find(p => p.id === socket.id);
-      if (!player || (player.gameRole !== 'challenger' && game.challengerId !== socket.id)) {
+      // Verwende direkt die Socket-ID statt über player.gameRole zu gehen
+      if (socket.id !== game.challengerId) {
         console.log('Non-challenger tried to make decision');
         return;
       }
-
+  
       const currentQ = game.questions[game.currentQuestion];
       const moderatorCorrect = parseInt(game.moderatorAnswer) === currentQ.correct;
-
+  
       let roundResult;
       let updates = { decision, phase: 'result' };
-
+  
       if (decision === 'trust') {
         updates.moderatorScore = game.moderatorScore + 1;
         roundResult = `${game.challengerName} trusts ${game.moderatorName}. ${game.moderatorName} gets 1 point.`;
+        updates.showModeratorAnswer = false;
       } else {
-        updates.challengerCoins = game.challengerCoins - 1;
+        // Bei Doubt: Münze wird IMMER zuerst abgezogen
+        const newCoinCount = game.challengerCoins - 1;
         updates.showModeratorAnswer = true;
         
         if (moderatorCorrect) {
+          // Moderator hatte recht: Münze ist weg
+          updates.challengerCoins = newCoinCount;
           updates.moderatorScore = game.moderatorScore + 1;
-          roundResult = `${game.challengerName} doubts. ${game.moderatorName} was right and gets 1 point.`;
+          roundResult = `${game.challengerName} doubts. ${game.moderatorName} was right and gets 1 point. Coin lost!`;
         } else {
-          updates.challengerCoins = game.challengerCoins; // Korrektur: Münze bleibt
-          roundResult = `${game.challengerName} doubts. ${game.moderatorName} was wrong. Coin stays.`;
+          // Moderator hatte unrecht: Münze bleibt (bzw. kommt zurück)
+          updates.challengerCoins = game.challengerCoins; // Münze bleibt
+          roundResult = `${game.challengerName} doubts. ${game.moderatorName} was wrong. Coin is retained.`;
         }
       }
-
+  
       updates.roundResult = roundResult;
       gameManager.updateGame(gameId, updates);
-      io.to(gameId).emit('game-updated', game);
+      
+      const updatedGame = gameManager.getGame(gameId);
+      io.to(gameId).emit('game-updated', updatedGame);
+      
+      console.log('Decision made:', decision, 'Result:', roundResult);
     } catch (error) {
       handleSocketError(socket, error, 'make-decision');
     }
@@ -1494,6 +1551,37 @@ socket.on('request-skip', (data) => {
     }
   } catch (error) {
     handleSocketError(socket, error, 'request-skip');
+  }
+});
+
+// Rollenauswahl
+socket.on('choose-role', (data) => {
+  try {
+    console.log('CHOOSE ROLE:', data);
+    const { gameId, choice } = data;
+    const game = gameManager.getGame(gameId);
+    
+    if (!game || game.state !== 'role-selection') {
+      console.log('Game not in role-selection state');
+      return;
+    }
+    
+    const session = sessionManager.findSessionBySocket(socket.id);
+    if (!session || !session.isHost) {
+      console.log('Non-host tried to choose roles:', socket.id);
+      return;
+    }
+
+    // Assign roles
+    gameManager.assignRoles(game, choice);
+    
+    // WICHTIG: Update muss an ALLE gesendet werden
+    const updatedGame = gameManager.getGame(gameId);
+    io.to(gameId).emit('game-updated', updatedGame);
+    
+    console.log('Roles assigned and game updated for all players');
+  } catch (error) {
+    handleSocketError(socket, error, 'choose-role');
   }
 });
 

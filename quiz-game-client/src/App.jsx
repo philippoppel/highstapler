@@ -155,19 +155,18 @@ const QuizGame = () => {
       socketRef.current.disconnect();
       socketRef.current = null;
     }
-
+  
     const socketOptions = {
       transports: ['websocket', 'polling'],
       timeout: 20000,
       forceNew: true,
       auth: {}
     };
-    
-    // Only set reconnectToken if it really exists and is valid
+
     if (reconnectToken && gameState !== 'menu' && gameState !== 'finished') {
       socketOptions.auth.reconnectToken = reconnectToken;
     }
-
+  
     socketRef.current = io(SOCKET_URL, socketOptions);
 
     // --- Socket Event Listeners ---
@@ -272,17 +271,32 @@ const QuizGame = () => {
         setTimeout(() => setAnimateCoins(false), 1000);
       }
     
-      setGameData(game);
+      setGameData(prevGameData => {
+        // Animationen nur wenn sich Werte ändern
+        if (prevGameData.challengerScore !== undefined && game.challengerScore > prevGameData.challengerScore) {
+          setAnimateScore(true);
+          setTimeout(() => setAnimateScore(false), 1000);
+        }
+        if (prevGameData.challengerCoins !== undefined && game.challengerCoins !== prevGameData.challengerCoins) {
+          setAnimateCoins(true);
+          setTimeout(() => setAnimateCoins(false), 1000);
+        }
+        
+        return game;
+      });
+      
       setGameState(game.state);
     
       const myPlayer = game.players?.find(p => p.id === socketRef.current.id);
       if (myPlayer?.gameRole) setGameRole(myPlayer.gameRole);
-    
+      
       if (game.phase === 'answering' && !game.challengerAnswered && !game.moderatorAnswered) {
         setMyAnswer('');
         setMyAnswered(false);
         setCanReportAfterAnswer(false);
         setPostAnswerReportRequested(false);
+        setWantToSkip(false);
+        setSkipRequested(false);
       }
       
       // Enable reporting after both players answered
@@ -290,7 +304,7 @@ const QuizGame = () => {
         setCanReportAfterAnswer(true);
       }
       
-      if (game.phase === 'result' && gameData.phase === 'decision') {
+      if (game.phase === 'result' && prevGameData.phase === 'decision') {
         setShowDecisionAnimation(true);
         setTimeout(() => setShowDecisionAnimation(false), 2000);
       }
@@ -360,7 +374,7 @@ const QuizGame = () => {
       setConnectionError(data.message || 'An error occurred');
     });
 
-  }, [reconnectToken, gameState, gameData.challengerScore, gameData.challengerCoins, gameData.phase, playerName]);
+  }, [reconnectToken, gameState]);
 
   // Attempt reconnection with token
   const attemptReconnect = useCallback(() => {
@@ -439,7 +453,10 @@ const QuizGame = () => {
   };
 
   const submitAnswer = () => {
-    if (!myAnswer || myAnswered || !connected) return;
+    if (!myAnswer || myAnswered || !connected || !socketRef.current?.connected) {
+      return;
+    }
+  
     setMyAnswered(true);
     socketRef.current.emit('submit-answer', { gameId, answer: myAnswer });
   };
@@ -859,7 +876,15 @@ const QuizGame = () => {
             </div>
           </div>
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6">
-            <h3 className="text-lg font-bold text-white mb-4">Players in room:</h3>
+          <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-white">Players in room:</h3>
+          <button 
+            onClick={() => socketRef.current?.emit('request-game-update', { gameId })}
+            className="text-xs text-gray-400 hover:text-white"
+          >
+            🔄 Refresh
+          </button>
+        </div>
             <div className="space-y-2">
               {gameData.players?.map((player, index) => (
                 <div key={index} className="flex items-center gap-3 bg-white/20 rounded-xl p-3 animate-slide-in" style={{animationDelay: `${index * 100}ms`}}>
@@ -916,17 +941,15 @@ const QuizGame = () => {
               <p className="text-gray-300 text-sm mt-2">Answers questions & builds trust</p>
             </div>
             <div className="text-center pt-4">
-              {playerRole === 'host' ? (
-                <button
-                  onClick={startGame}
-                  disabled={!connected || !gameData.challengerName || !gameData.moderatorName}
-                  className="bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-8 rounded-xl hover:from-green-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
-                >
-                  {connected ? 'Start Game' : 'Connecting...'}
-                </button>
-              ) : (
-                <p className="text-gray-300 animate-pulse">Waiting for the game host...</p>
-              )}
+            {playerRole === 'host' && gameData.players?.length === 2 && (
+          <button
+            onClick={() => socketRef.current?.emit('choose-role', { gameId, choice: 'random' })}
+            disabled={!connected}
+            className="w-full mt-4 bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          >
+            Choose Roles & Start
+          </button>
+        )}
             </div>
           </div>
         </div>
