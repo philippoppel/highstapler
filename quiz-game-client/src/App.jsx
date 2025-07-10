@@ -1129,46 +1129,47 @@ const QuizGame = () => {
                   
                   {/* Post-Answer Report Section */}
                   {canReportAfterAnswer && (
-                    <div className="mb-4">
-                      {gameData.postAnswerReportRequests?.includes(socketRef.current?.id) ? (
-                        // Wenn der aktuelle Spieler bereits gemeldet hat
-                        <div className="bg-orange-500/20 rounded-xl p-3 inline-block">
-                          <p className="text-orange-400 text-sm">
-                            You reported this question. Waiting for other player...
-                          </p>
-                          <button
-                            onClick={cancelPostAnswerReport}
-                            className="text-xs text-orange-300 hover:text-orange-100 underline mt-1"
-                          >
-                            Cancel report
-                          </button>
-                        </div>
-                      ) : (
-                        // Wenn der aktuelle Spieler noch nicht gemeldet hat
-                        <>
-                          <button
-                            onClick={requestPostAnswerReport}
-                            disabled={!connected}
-                            className="text-orange-400 hover:text-orange-200 text-sm underline transition-all"
-                          >
-                            Report this question as invalid
-                          </button>
-                          {/* Zeige eine Nachricht an, falls der andere Spieler bereits gemeldet hat */}
-                          {gameData.postAnswerReportRequests?.length > 0 && (
-                            <p className="text-orange-400 text-xs mt-2">
-                              {gameData.postAnswerReportRequestedBy} has already reported this question.
-                            </p>
-                          )}
-                        </>
-                      )}
-                      
-                      {gameData.postAnswerReportRequests?.length === 2 && (
-                        <p className="text-red-400 text-sm mt-2 animate-pulse">
-                          Both players agreed - question invalidated, 0 points for all!
+                  <div className="mb-4">
+                    {gameData.postAnswerReportRequests?.includes(socketRef.current?.id) ? (
+                      /* Wenn der aktuelle Spieler bereits gemeldet hat */
+                      <div className="bg-orange-500/20 rounded-xl p-3 inline-block">
+                        <p className="text-orange-400 text-sm">
+                          You reported this question. Waiting for other player...
                         </p>
-                      )}
-                    </div>
-                  )}
+                        <button
+                          onClick={cancelPostAnswerReport}
+                          className="text-xs text-orange-300 hover:text-orange-100 underline mt-1"
+                        >
+                          Cancel report
+                        </button>
+                      </div>
+                    ) : (
+                      /* Wenn der aktuelle Spieler noch nicht gemeldet hat */
+                      <>
+                        <button
+                          onClick={requestPostAnswerReport}
+                          disabled={!connected}
+                          className="text-orange-400 hover:text-orange-200 text-sm underline transition-all"
+                        >
+                          Report this question as invalid
+                        </button>
+                        {/* Zeige eine Nachricht an, falls der andere Spieler bereits gemeldet hat */}
+                        {gameData.postAnswerReportRequests?.length > 0 && (
+                          <p className="text-orange-400 text-xs mt-2">
+                            {gameData.postAnswerReportRequestedBy} has already reported this question.
+                          </p>
+                        )}
+                      </>
+                    )}
+
+                    {/* Diese Meldung wird für alle angezeigt, wenn beide gemeldet haben */}
+                    {gameData.postAnswerReportRequests?.length === 2 && (
+                      <p className="text-red-400 text-sm mt-2 animate-pulse">
+                        Both players agreed - question invalidated, 0 points for all!
+                      </p>
+                    )}
+                  </div>
+                )}
                 </div>
                 
                 {gameRole === 'challenger' ? (
