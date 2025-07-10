@@ -46,7 +46,6 @@ const QuizGame = () => {
   const [focusLostTime, setFocusLostTime] = useState(null);
   
   const [canReportAfterAnswer, setCanReportAfterAnswer] = useState(false);
-  const [postAnswerReportRequested, setPostAnswerReportRequested] = useState(false);
 
   // Heartbeat system to check connection health
   useEffect(() => {
@@ -294,7 +293,6 @@ const QuizGame = () => {
         setMyAnswer('');
         setMyAnswered(false);
         setCanReportAfterAnswer(false);
-        setPostAnswerReportRequested(false);
         setWantToSkip(false);
         setSkipRequested(false);
       }
@@ -318,15 +316,6 @@ const QuizGame = () => {
       }
     });
     
-    socketRef.current.on('post-answer-report-requested', (data) => {
-      console.log('Post-answer report requested by:', data.playerName);
-      setPostAnswerReportRequested(true);
-    });
-    
-    socketRef.current.on('post-answer-report-cancelled', () => {
-      console.log('Post-answer report cancelled');
-      setPostAnswerReportRequested(false);
-    });
     
     socketRef.current.on('question-invalidated', (data) => {
       console.log('Question invalidated - both players agreed');
@@ -697,6 +686,18 @@ const QuizGame = () => {
                   </p>
                 </div>
               </div>
+            </div>
+
+            {/* Game Rules Summary */}
+            div className="bg-white/5 rounded-xl p-4 mb-6 text-xs text-gray-400">
+              <h4 className="text-white font-bold mb-2">How to play:</h4>
+              <ul className="space-y-1 text-left">
+                <li>• Challenger: Answer questions, then trust or doubt the moderator</li>
+                <li>• Moderator: Answer questions and build trust to earn points</li>
+                <li>• Doubt costs 1 coin, but you get it back if moderator is wrong</li>
+                <li>• First to 5 points wins, or moderator wins if challenger hits 0 coins</li>
+                <li>• Questions are AI-generated and may contain errors</li>
+              </ul>
             </div>
 
             {/* Create Game */}
@@ -1129,30 +1130,36 @@ const QuizGame = () => {
                   {/* Post-Answer Report Section */}
                   {canReportAfterAnswer && (
                     <div className="mb-4">
-                      {!postAnswerReportRequested && !gameData.postAnswerReportRequests?.includes(socketRef.current?.id) ? (
-                        <button
-                          onClick={requestPostAnswerReport}
-                          disabled={!connected}
-                          className="text-orange-400 hover:text-orange-200 text-sm underline transition-all"
-                        >
-                          Report this question as invalid
-                        </button>
-                      ) : (
+                      {gameData.postAnswerReportRequests?.includes(socketRef.current?.id) ? (
+                        // Wenn der aktuelle Spieler bereits gemeldet hat
                         <div className="bg-orange-500/20 rounded-xl p-3 inline-block">
                           <p className="text-orange-400 text-sm">
-                            {gameData.postAnswerReportRequests?.includes(socketRef.current?.id) 
-                              ? 'You reported this question as invalid' 
-                              : `${gameData.postAnswerReportRequestedBy || 'Other player'} reported this question`}
+                            You reported this question. Waiting for other player...
                           </p>
-                          {gameData.postAnswerReportRequests?.includes(socketRef.current?.id) && (
-                            <button
-                              onClick={cancelPostAnswerReport}
-                              className="text-xs text-orange-300 hover:text-orange-100 underline mt-1"
-                            >
-                              Cancel report
-                            </button>
-                          )}
+                          <button
+                            onClick={cancelPostAnswerReport}
+                            className="text-xs text-orange-300 hover:text-orange-100 underline mt-1"
+                          >
+                            Cancel report
+                          </button>
                         </div>
+                      ) : (
+                        // Wenn der aktuelle Spieler noch nicht gemeldet hat
+                        <>
+                          <button
+                            onClick={requestPostAnswerReport}
+                            disabled={!connected}
+                            className="text-orange-400 hover:text-orange-200 text-sm underline transition-all"
+                          >
+                            Report this question as invalid
+                          </button>
+                          {/* Zeige eine Nachricht an, falls der andere Spieler bereits gemeldet hat */}
+                          {gameData.postAnswerReportRequests?.length > 0 && (
+                            <p className="text-orange-400 text-xs mt-2">
+                              {gameData.postAnswerReportRequestedBy} has already reported this question.
+                            </p>
+                          )}
+                        </>
                       )}
                       
                       {gameData.postAnswerReportRequests?.length === 2 && (
@@ -1416,18 +1423,6 @@ const QuizGame = () => {
                   <p className="text-yellow-400 font-bold">{gameData.challengerCoins}</p>
                 </div>
               </div>
-            </div>
-
-            {/* Game Rules Summary */}
-            <div className="bg-white/5 rounded-xl p-4 mb-6 text-xs text-gray-400">
-              <h4 className="text-white font-bold mb-2">How to play:</h4>
-              <ul className="space-y-1 text-left">
-                <li>• Challenger: Answer questions, then trust or doubt the moderator</li>
-                <li>• Moderator: Answer questions and build trust to earn points</li>
-                <li>• Doubt costs 1 coin, but you get it back if moderator is wrong</li>
-                <li>• First to 5 points wins, or moderator wins if challenger hits 0 coins</li>
-                <li>• Questions are AI-generated and may contain errors</li>
-              </ul>
             </div>
 
             <div className="space-y-3">
