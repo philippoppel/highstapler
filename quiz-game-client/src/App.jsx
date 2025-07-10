@@ -48,6 +48,23 @@ const QuizGame = () => {
   
   const [canReportAfterAnswer, setCanReportAfterAnswer] = useState(false);
 
+  useEffect(() => {
+    // Diese Bedingung verhindert die Animation beim initialen Laden der Seite
+    if (gameData.challengerScore > 0 || gameData.moderatorScore > 0) {
+      setAnimateScore(true);
+      setTimeout(() => setAnimateScore(false), 1000);
+    }
+  }, [gameData.challengerScore, gameData.moderatorScore]);
+    
+  useEffect(() => {
+    
+    // Prüft, ob sich die Münzen seit dem Start geändert haben und initialCoins existiert
+    if (gameData.initialCoins !== undefined && gameData.challengerCoins !== gameData.initialCoins) {
+    setAnimateCoins(true);
+    setTimeout(() => setAnimateCoins(false), 1000);
+    }
+    }, [gameData.challengerCoins, gameData.initialCoins]);
+  
   // Heartbeat system to check connection health
   useEffect(() => {
     const interval = setInterval(() => {
@@ -290,17 +307,6 @@ const QuizGame = () => {
       // This should be done in a useEffect hook that watches for changes in `gameData`
     });
  
-    // Add a new useEffect to handle animations when gameData changes
-    useEffect(() => {
-      if (gameData.challengerScore > 0) { // Add a condition to prevent animation on initial load
-        setAnimateScore(true);
-        setTimeout(() => setAnimateScore(false), 1000);
-      }
-      if (gameData.challengerCoins !== gameData.initialCoins) { // Compare against initial value
-         setAnimateCoins(true);
-         setTimeout(() => setAnimateCoins(false), 1000);
-      }
-    }, [gameData.challengerScore, gameData.challengerCoins]); // Dependencies
     
     
     socketRef.current.on('question-invalidated', (data) => {
