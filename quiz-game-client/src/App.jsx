@@ -943,11 +943,11 @@ const QuizGame = () => {
             <div className="text-center pt-4">
             {playerRole === 'host' && gameData.players?.length === 2 && (
           <button
-            onClick={() => socketRef.current?.emit('choose-role', { gameId, choice: 'random' })}
+            onClick={() => socketRef.current?.emit('start-game', { gameId })}
             disabled={!connected}
             className="w-full mt-4 bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:from-green-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
-            Choose Roles & Start
+            Start Game
           </button>
         )}
             </div>
