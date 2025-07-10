@@ -689,7 +689,7 @@ const QuizGame = () => {
             </div>
 
             {/* Game Rules Summary */}
-            div className="bg-white/5 rounded-xl p-4 mb-6 text-xs text-gray-400">
+            <div className="bg-white/5 rounded-xl p-4 mb-6 text-xs text-gray-400">
               <h4 className="text-white font-bold mb-2">How to play:</h4>
               <ul className="space-y-1 text-left">
                 <li>• Challenger: Answer questions, then trust or doubt the moderator</li>
