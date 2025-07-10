@@ -35,12 +35,16 @@ const QuestionSchema = z.object({
   difficulty: z.enum(['easy', 'medium', 'hard'])
 });
 
+const WikiVerifiedQuestionSchema = QuestionSchema.extend({
+    wikiVerified: z.boolean().optional(),
+    wikiSource: z.string().optional()
+  });
+
 function validateQuestions(rawQuestions = []) {
   const valid = [];
   for (const q of rawQuestions) {
     try {
-      const parsed = QuestionSchema.parse(q);
-      // Fallback‑ID, falls Generator keine gesetzt hat
+      const parsed = q.wikiVerified ? WikiVerifiedQuestionSchema.parse(q) : QuestionSchema.parse(q);      // Fallback‑ID, falls Generator keine gesetzt hat
       if (!parsed.id) parsed.id = crypto.randomUUID();
       valid.push(parsed);
     } catch (err) {
@@ -59,19 +63,27 @@ function scheduleDeepChecks(questions) {
 }
 
 async function runDeepChecks(questions) {
-  for (const q of questions) {
-    try {
-      const okSelf   = await selfConsistentAnswer(q);
-      const okCross  = await crossModelCheck(q);
-      if (!okSelf || !okCross) {
-        q.reported = true;  // Markieren, damit du sie später entfernst
-        console.warn(`[QualityGate] Flagged Q “${q.question.slice(0,80)}…”`);
+    for (const q of questions) {
+      try {
+        // Skip Wikipedia-verified questions
+        if (q.wikiVerified) {
+          console.log(`[QualityGate] Skipping deep checks for wiki-verified question: "${q.question.slice(0,50)}…"`);
+          continue;
+        }
+        
+        // Nur für nicht-Wikipedia-verifizierte Fragen
+        const okSelf = await selfConsistentAnswer(q);
+        const okCross = await crossModelCheck(q);
+        
+        if (!okSelf || !okCross) {
+          q.reported = true;
+          console.warn(`[QualityGate] Flagged Q "${q.question.slice(0,80)}…"`);
+        }
+      } catch (err) {
+        console.error('[QualityGate] Deep check failed:', err.message);
       }
-    } catch (err) {
-      console.error('[QualityGate] Deep check failed:', err.message);
     }
   }
-}
 
 // ─────────────────────────────────────────────────────────────
 // 2a) Self‑Consistency über Mehrheits‑Vote (3 Samples)
