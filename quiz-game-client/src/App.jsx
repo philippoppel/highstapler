@@ -374,7 +374,7 @@ const QuizGame = () => {
       setConnectionError(data.message || 'An error occurred');
     });
 
-  }, [reconnectToken, gameState]);
+  }, [reconnectToken]);
 
   // Attempt reconnection with token
   const attemptReconnect = useCallback(() => {
@@ -419,7 +419,7 @@ const QuizGame = () => {
         socketRef.current = null;
       }
     };
-  }, [initializeSocket]);
+  }, []);
 
   // --- Game Actions ---
   const retryConnection = () => {
