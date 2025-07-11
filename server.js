@@ -1888,27 +1888,24 @@ const findPlayerInGame = (gameId, socketId) => {
         timestamp: Date.now()
       };
 
-      // Chat-Nachrichten im Spiel speichern
+      // Speichere die Nachricht im Spielzustand
       if (!game.chatMessages) {
         game.chatMessages = [];
       }
       game.chatMessages.push(chatMessage);
-
-      // Nur die letzten 50 Nachrichten behalten
       if (game.chatMessages.length > 50) {
-        game.chatMessages = game.chatMessages.slice(-50);
+        game.chatMessages.slice(-50);
       }
 
-      // An alle Spieler im Raum senden
-      io.to(gameId).emit('chat-message', chatMessage);
-      io.in(gameId).emit('chat-message', chatMessage);
+      // KORREKTUR: Sende die Nachricht an alle ANDEREN im Raum.
+      // Der Absender hat die Nachricht bereits lokal hinzugefügt.
+      socket.broadcast.to(gameId).emit('chat-message', chatMessage);
 
       console.log(`Chat message in game ${gameId} from ${player.name}: ${message}`);
     } catch (error) {
       handleSocketError(socket, error, 'chat-message');
     }
   });
-
   // Reconnect handling
   socket.on('reconnect-attempt', (data) => {
     try {
