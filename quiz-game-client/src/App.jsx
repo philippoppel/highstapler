@@ -503,7 +503,7 @@ const [showChat, setShowChat] = useState(false);
 
   // --- Render Helper Components ---
   const renderChat = () => {
-    if (gameState !== 'playing' && gameState !== 'result' && gameState !== 'decision') return null;
+    if (gameState === 'menu' || gameState === 'lobby' || gameState === 'finished') return null;
     
     return (
       <div className="fixed bottom-4 right-4 z-40">
