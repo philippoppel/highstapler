@@ -188,7 +188,7 @@ class GameManager {
   createGame(hostId, hostName, settings = {}) {
     const gameId = this.generateGameId();
     const initialCoins = this.getRandomCoins();
-    
+
     const game = {
       id: gameId,
       hostId,
@@ -232,10 +232,11 @@ class GameManager {
       version: 1,
       skipRequests: [],
       skipRequestedBy: null,
-      postAnswerReportRequests: [], // NEW
-      postAnswerReportRequestedBy: null // NEW
+      postAnswerReportRequests: [],
+      postAnswerReportRequestedBy: null,
+      chatMessages: []
     };
-  
+
     this.games.set(gameId, game);
     this.gamesByPlayer.set(hostId, gameId);
     
@@ -1139,6 +1140,18 @@ const authenticateSocket = (socket, next) => {
       socket.session = session;
       sessionManager.reconnectSession(session.id, socket.id);
       console.log('Socket reconnected with session:', session.id);
+
+      socket.join(session.gameId);
+
+      const game = gameManager.getGame(session.gameId);
+         if (game) {
+             const player = game.players.find(p => p.name === session.playerName);
+             if (player) {
+                 player.id = socket.id;
+                 player.connected = true;
+                 player.lastSeen = Date.now();
+               }
+           }
     }
   }
   
@@ -1842,6 +1855,57 @@ socket.on('next-round', async (data) => {
       }
     } catch (error) {
       console.error('Error handling disconnect:', error);
+    }
+  });
+
+  // Helper function to find player in game
+const findPlayerInGame = (gameId, socketId) => {
+  const game = gameManager.getGame(gameId);
+  if (!game) return null;
+  return game.players.find(p => p.id === socketId);
+};
+
+  socket.on('chat-message', (data) => {
+    console.log('Received chat-message event:', data);
+    try {
+      const { gameId, message } = data;
+      const game = gameManager.getGame(gameId);
+
+      if (!game || game.state !== 'playing') {
+        console.log('Invalid game state for chat');
+        return;
+      }
+
+      const player = game.players.find(p => p.id === socket.id);
+      if (!player) {
+        console.log('Player not found for chat');
+        return;
+      }
+
+      const chatMessage = {
+        playerName: player.name,
+        message: message.slice(0, 100), // Limit message length
+        timestamp: Date.now()
+      };
+
+      // Chat-Nachrichten im Spiel speichern
+      if (!game.chatMessages) {
+        game.chatMessages = [];
+      }
+      game.chatMessages.push(chatMessage);
+
+      // Nur die letzten 50 Nachrichten behalten
+      if (game.chatMessages.length > 50) {
+        game.chatMessages = game.chatMessages.slice(-50);
+      }
+
+      // An alle Spieler im Raum senden
+      io.to(gameId).emit('chat-message', chatMessage);
+      io.in(gameId).emit('chat-message', chatMessage);
+
+      console.log(`Chat message in game ${gameId} from ${player.name}: ${message}`);
+    } catch (error) {
+      handleSocketError(socket, error, 'chat-message');
     }
   });
 

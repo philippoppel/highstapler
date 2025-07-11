@@ -131,15 +131,19 @@ const [showChat, setShowChat] = useState(false);
   }, [gameState, gameData.phase, focusLostTime]);
 
   const sendChatMessage = () => {
-    if (!chatMessage.trim() || !connected) return;
-    
-    socketRef.current.emit('chat-message', { 
-      gameId, 
-      message: chatMessage.trim() 
+    if (!chatMessage.trim() || !connected) {
+      console.log('Cannot send: no message or not connected');
+      return;
+    }
+
+    console.log('Sending chat message:', { gameId, message: chatMessage.trim() });
+
+    socketRef.current.emit('chat-message', {
+      gameId,
+      message: chatMessage.trim()
     });
     setChatMessage('');
   };
-
   // Determines connection quality based on ping
   const getConnectionQuality = () => {
     const timeSinceLastPing = Date.now() - lastPing;
@@ -275,8 +279,12 @@ const [showChat, setShowChat] = useState(false);
     socketRef.current.on('chat-message', (data) => {
       setGameData(prev => ({
         ...prev,
-        chatMessages: [...(prev.chatMessages || []), data]
+        chatMessages: [
+          ...(prev.chatMessages || []),
+          { playerName, message: trimmed, timestamp: Date.now() }
+        ]
       }));
+      setChatMessage('');
     });
 
     socketRef.current.on('skip-requested', (data) => {
@@ -299,8 +307,6 @@ const [showChat, setShowChat] = useState(false);
     });
 
     socketRef.current.on('game-updated', (newGameData) => {
-      // Log to see what the server is sending
-      console.log('Received game-updated with new data:', newGameData);
  
       // --- 1. Directly update the main game data ---
       setGameData(newGameData);
@@ -502,54 +508,71 @@ const [showChat, setShowChat] = useState(false);
   };
 
   // --- Render Helper Components ---
+
   const renderChat = () => {
     if (gameState === 'menu' || gameState === 'lobby' || gameState === 'finished') return null;
-    
+
+    // Debug log
+    console.log('Current gameId:', gameId, 'Connected:', connected, 'Game State:', gameState);
+
     return (
-      <div className="fixed bottom-4 right-4 z-40">
-        {/* Chat Toggle Button */}
-        <button
-          onClick={() => setShowChat(!showChat)}
-          className="bg-white/20 backdrop-blur-lg rounded-full p-3 text-white hover:bg-white/30 transition-all mb-2"
-        >
-          💬
-        </button>
-        
-        {/* Chat Window */}
-        {showChat && (
-          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 w-80 max-w-[90vw]">
-            {/* Messages */}
-            <div className="h-32 overflow-y-auto mb-3 space-y-2">
-              {(gameData.chatMessages || []).slice(-10).map((msg, index) => (
-                <div key={index} className="text-sm">
-                  <span className="text-blue-400 font-bold">{msg.playerName}: </span>
-                  <span className="text-white">{msg.message}</span>
+        <div className="fixed bottom-4 right-4 z-40">
+          {/* Chat Toggle Button */}
+          <button
+              onClick={() => setShowChat(!showChat)}
+              className="bg-white/20 backdrop-blur-lg rounded-full p-3 text-white hover:bg-white/30 transition-all mb-2"
+          >
+            💬 {(gameData.chatMessages || []).length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center">
+            {gameData.chatMessages.length}
+          </span>
+          )}
+          </button>
+
+          {/* Chat Window */}
+          {showChat && (
+              <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 w-80 max-w-[90vw]">
+                {/* Debug Info */}
+                {!connected && (
+                    <div className="text-red-400 text-xs mb-2">Not connected to server!</div>
+                )}
+
+                {/* Messages */}
+                <div className="h-32 overflow-y-auto mb-3 space-y-2">
+                  {gameData.chatMessages && gameData.chatMessages.length > 0 ? (
+                      gameData.chatMessages.slice(-10).map((msg, index) => (
+                          <div key={index} className="text-sm">
+                            <span className="text-blue-400 font-bold">{msg.playerName}: </span>
+                            <span className="text-white">{msg.message}</span>
+                          </div>
+                      ))
+                  ) : (
+                      <div className="text-gray-400 text-sm">No messages yet...</div>
+                  )}
                 </div>
-              ))}
-            </div>
-            
-            {/* Input */}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={chatMessage}
-                onChange={(e) => setChatMessage(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && sendChatMessage()}
-                placeholder="Type message..."
-                maxLength={100}
-                className="flex-1 p-2 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:outline-none text-sm"
-              />
-              <button
-                onClick={sendChatMessage}
-                disabled={!chatMessage.trim()}
-                className="bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm"
-              >
-                Send
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+
+                {/* Input */}
+                <div className="flex gap-2">
+                  <input
+                      type="text"
+                      value={chatMessage}
+                      onChange={(e) => setChatMessage(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && sendChatMessage()}
+                      placeholder="Type message..."
+                      maxLength={100}
+                      className="flex-1 p-2 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:outline-none text-sm"
+                  />
+                  <button
+                      onClick={sendChatMessage}
+                      disabled={!chatMessage.trim() || !connected}
+                      className="bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm"
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+          )}
+        </div>
     );
   };
   const renderConnectionStatus = () => {
@@ -760,6 +783,7 @@ const [showChat, setShowChat] = useState(false);
         {renderConnectionStatus()}
         {renderErrorNotification()}
         {renderFocusWarning()}
+        {renderChat()}
         <div className="max-w-md mx-auto pt-8 px-4 md:px-0">
           <div className="text-center mb-8 animate-fade-in">
             <div className="flex justify-center mb-4">
@@ -967,6 +991,7 @@ const [showChat, setShowChat] = useState(false);
         {renderConnectionStatus()}
         {renderErrorNotification()}
         {renderFocusWarning()}
+        {renderChat()}
         <div className="max-w-md mx-auto pt-8">
           <div className="text-center mb-8 animate-fade-in">
             <h1 className="text-3xl font-bold text-white mb-2">Waiting for players...</h1>
@@ -1027,6 +1052,7 @@ const [showChat, setShowChat] = useState(false);
         {renderConnectionStatus()}
         {renderErrorNotification()}
         {renderFocusWarning()}
+        {renderChat()}
         <div className="max-w-md mx-auto pt-8">
           <div className="text-center mb-8 animate-fade-in">
             <h1 className="text-3xl font-bold text-white mb-2">Assigning Roles...</h1>
@@ -1069,7 +1095,6 @@ const [showChat, setShowChat] = useState(false);
   // Playing Screen
   if (gameState === 'playing') {
     const currentQ = gameData.questions?.[gameData.currentQuestion];
-
     if (!currentQ) {
       return (
         <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4 flex items-center justify-center">
@@ -1086,6 +1111,7 @@ const [showChat, setShowChat] = useState(false);
         {renderConnectionStatus()}
         {renderErrorNotification()}
         {renderFocusWarning()}
+        {renderChat()}
         <div className="max-w-2xl mx-auto px-4 md:px-0">
         {/* Header */}
           <div className="text-center mb-4 pt-4">
@@ -1400,7 +1426,7 @@ const [showChat, setShowChat] = useState(false);
         {renderConnectionStatus()}
         {renderErrorNotification()}
         {renderFocusWarning()}
-        
+        {renderChat()}
         {/* Animated Background Effects for Winner */}
         {!isDraw && (
           <>
