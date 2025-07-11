@@ -34,9 +34,8 @@ const QuizGame = () => {
   const [myAnswered, setMyAnswered] = useState(false);
   const [animateScore, setAnimateScore] = useState(false);
   const [animateCoins, setAnimateCoins] = useState(false);
-  const [showDecisionAnimation, setShowDecisionAnimation] = useState(false);
+  const [showDecisionAnimation] = useState(false);
   const [lastPing, setLastPing] = useState(Date.now());
-  const [wantToSkip, setWantToSkip] = useState(false);
   const [skipRequested, setSkipRequested] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
 
@@ -47,6 +46,7 @@ const QuizGame = () => {
   const [focusLostTime, setFocusLostTime] = useState(null);
   
   const [canReportAfterAnswer, setCanReportAfterAnswer] = useState(false);
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
 
   const [chatMessage, setChatMessage] = useState('');
@@ -58,6 +58,11 @@ const [showChat, setShowChat] = useState(false);
       setTimeout(() => setAnimateScore(false), 1000);
     }
   }, [gameData.challengerScore, gameData.moderatorScore]);
+
+  const showChatRef = useRef(showChat);
+  useEffect(() => {
+    showChatRef.current = showChat;
+  }, [showChat]);
     
   useEffect(() => {
     
@@ -287,9 +292,12 @@ const [showChat, setShowChat] = useState(false);
           { ...msg, timestamp: msg.timestamp ?? Date.now() }
         ]
       }));
-      setChatMessage('');
-    });
 
+      // Erhöhe den Zähler nur, wenn der Chat NICHT geöffnet ist.
+      if (!showChatRef.current) {
+        setUnreadMessages(prev => prev + 1);
+      }
+    });
     socketRef.current.on('skip-requested', (data) => {
       console.log('Skip requested by:', data.playerName);
       setWantToSkip(true);
@@ -515,31 +523,33 @@ const [showChat, setShowChat] = useState(false);
   const renderChat = () => {
     if (gameState === 'menu' || gameState === 'lobby' || gameState === 'finished') return null;
 
-    // Debug log
-    console.log('Current gameId:', gameId, 'Connected:', connected, 'Game State:', gameState);
+    const handleToggleChat = () => {
+      // Wenn der Chat gerade geöffnet wird, setze den Zähler zurück.
+      if (!showChat) {
+        setUnreadMessages(0);
+      }
+      setShowChat(!showChat);
+    };
 
     return (
         <div className="fixed bottom-4 right-4 z-40">
           {/* Chat Toggle Button */}
           <button
-              onClick={() => setShowChat(!showChat)}
+              onClick={handleToggleChat} // Geänderter Handler
               className="bg-white/20 backdrop-blur-lg rounded-full p-3 text-white hover:bg-white/30 transition-all mb-2"
           >
-            💬 {(gameData.chatMessages || []).length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center">
-            {gameData.chatMessages.length}
-          </span>
-          )}
+            💬
+            {/* Zeigt den Zähler basierend auf dem neuen State an */}
+            {unreadMessages > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center">
+              {unreadMessages}
+            </span>
+            )}
           </button>
 
           {/* Chat Window */}
           {showChat && (
               <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 w-80 max-w-[90vw]">
-                {/* Debug Info */}
-                {!connected && (
-                    <div className="text-red-400 text-xs mb-2">Not connected to server!</div>
-                )}
-
                 {/* Messages */}
                 <div className="h-32 overflow-y-auto mb-3 space-y-2">
                   {gameData.chatMessages && gameData.chatMessages.length > 0 ? (
