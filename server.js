@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const cheerio = require('cheerio');
 const { validateQuestions, scheduleDeepChecks } = require('./qualityChecks');
 require('dotenv').config();
+const blacklistManager = require('./blacklistManager');
 
 const app = express();
 const server = http.createServer(app);
@@ -546,12 +547,7 @@ if (this.questionCache.length > 0) {
           console.log(`${localQuestions.length} lokale Fragen verwendet`);
       }
   }
-  
-  // Fülle den Cache im Hintergrund für zukünftige Anfragen auf
-  if (this.questionCache.length < 50) {
-      this.prefillCache();
-  }
-  
+
   const finalQuestions = this.deduplicateQuestions(questions, gameId).slice(0, count);
   console.log(`Anfrage abgeschlossen. ${finalQuestions.length} finale Fragen werden zurückgegeben.`);
   return finalQuestions;
@@ -568,64 +564,87 @@ if (this.questionCache.length > 0) {
     return this.groqRequestCount < 30; // 30 Anfragen pro Minute
   }
 
-  async prefillCache() {
-    if (this.questionCache.length < 50 && this.canMakeGroqRequest()) {
-      try {
-        const newQuestions = await this.generateWithGroq(10);
-        this.questionCache = [...this.questionCache, ...newQuestions];
-      } catch (error) {
-        console.error('Error pre-filling cache:', error);
+  async intelligentPrefill() {
+    console.log('[Cache] Starte intelligentes Vorfüllen des Caches...');
+
+    // Definiere hier die Themen, die bei deinen Spielern am beliebtesten sind.
+    const popularTopics = ['Marvel', 'Harry Potter', 'Geschichte', 'Geographie', 'Star Wars', 'Wissenschaft'];
+    const difficulties = ['easy', 'medium', 'hard'];
+    const questionsPerBatch = 5; // Lade pro Kombination nur ein paar Fragen, um Vielfalt zu gewährleisten.
+
+    // Gehe die beliebten Themen durch und fülle den Cache.
+    for (const topic of popularTopics) {
+      for (const difficulty of difficulties) {
+        // Stoppe, wenn der Cache voll genug ist oder das API-Limit erreicht wird.
+        if (this.questionCache.length >= 100 || !this.canMakeGroqRequest()) {
+          console.log(`[Cache] Vorfüllen bei ${this.questionCache.length} Fragen beendet.`);
+          return;
+        }
+
+        try {
+          console.log(`[Cache] Fülle Cache mit: ${topic} (${difficulty})`);
+          const newQuestions = await this.generateWithGroq(questionsPerBatch, difficulty, topic);
+
+          // Filtere Duplikate und bereits genutzte Fragen direkt aus.
+          const uniqueNewQuestions = this.deduplicateQuestions(newQuestions);
+
+          this.questionCache.push(...uniqueNewQuestions);
+
+        } catch (error) {
+          console.error(`[Cache] Fehler beim Vorfüllen für Thema "${topic}":`, error.message);
+          // Mache weiter, auch wenn ein Thema fehlschlägt.
+          continue;
+        }
       }
     }
+    console.log(`[Cache] Intelligentes Vorfüllen abgeschlossen. Cache-Größe: ${this.questionCache.length}`);
   }
-
 // Dies ist die verbesserte Funktion, die die alte komplett ersetzt.
 
-async generateWithGroq(count, difficulty = 'medium', customCategory = null) {
-  if (!this.groqApiKey || !this.canMakeGroqRequest()) return [];
-  this.groqRequestCount++;
+  async generateWithGroq(count, difficulty = 'medium', customCategory = null) {
+    if (!this.groqApiKey || !this.canMakeGroqRequest()) return [];
+    this.groqRequestCount++;
 
-  try {
-    // Schritt 1: Wikipedia-Artikel zum Thema finden
-    const wikiContext = await this.fetchWikipediaContext(customCategory);
-    if (!wikiContext) {
-      console.log(`Keine Wikipedia-Informationen für "${customCategory}" gefunden`);
-      return [];
-    }
+    try {
+      // SCHRITT 1: Finde potenzielle Wikipedia-Artikel.
+      const potentialTitles = await this.fetchWikipediaSearch(customCategory);
+      if (!potentialTitles || potentialTitles.length === 0) {
+        console.log(`Keine Wikipedia-Artikel für "${customCategory}" gefunden. Breche Groq-Generierung ab.`);
+        return []; // Frühzeitiger Abbruch, wenn nichts gefunden wird
+      }
 
-    const difficultyMap = {
-      easy: 'easy (basic facts clearly stated in the text, like names, locations, or simple facts)',
-      medium: 'medium (requires connecting 2-3 pieces of information from the text)',
-      hard: 'hard (specific details, dates, numbers, or information that requires careful reading)'
-    };
-    
-    // Erweitere den Prompt mit besseren Schwierigkeits-Beispielen
-    const prompt = `Based on the following Wikipedia information, generate ${count} multiple-choice quiz questions.
+      // SCHRITT 2: Lasse die KI den besten Artikel auswählen (das löst das "Marvel"-Problem).
+      const bestTitle = await this.getBestWikipediaTitle(customCategory, potentialTitles);
+
+      // SCHRITT 3: Hole den Inhalt NUR des besten Artikels.
+      const wikiContext = await this.fetchWikipediaArticleContent(bestTitle);
+      if (!wikiContext) {
+        console.log(`Konnte keinen Inhalt für den ausgewählten Artikel "${bestTitle}" laden.`);
+        return [];
+      }
+
+      // SCHRITT 4: Generiere die Fragen mit dem präzisen Kontext und einem verbesserten Prompt.
+      const prompt = `Based STRICTLY on the following Wikipedia article content, generate ${count} high-quality, multiple-choice quiz questions about "${customCategory}".
     
     WIKIPEDIA CONTEXT:
+    """
     ${wikiContext}
+    """
     
     DIFFICULTY LEVEL: ${difficulty.toUpperCase()}
-    ${difficultyMap[difficulty]}
     
-    DIFFICULTY GUIDELINES BASED ON THE TEXT:
-    - EASY: Ask about main topics, names, or facts that are explicitly stated. Example: "What is X?" when X is clearly defined in the text.
-    - MEDIUM: Ask about relationships, causes, or facts that require reading 2-3 sentences. Example: "Why did X happen?" when the cause is explained across multiple sentences.
-    - HARD: Ask about specific details, exact dates, percentages, or information mentioned only once. Example: "In which year...?" or "What percentage...?"
+    VERY IMPORTANT RULES:
+    1.  **Use ONLY information from the provided WIKIPEDIA CONTEXT.** Do not invent facts or use any outside knowledge.
+    2.  The correct answer MUST be explicitly verifiable from the text.
+    3.  Wrong options should be plausible but clearly incorrect according to the text.
+    4.  **For the topic "${customCategory}", if it's ambiguous, focus on the context of the article (e.g., for "Marvel", focus on comics/movies, NOT the dictionary word).**
+    5.  Ensure the questions are distinct and not repetitive.
     
-    IMPORTANT RULES:
-    1. Questions MUST be answerable using ONLY the Wikipedia text above
-    2. Difficulty must match the ${difficulty} level as described
-    3. For EASY questions, the answer should be directly findable in a single sentence
-    4. For MEDIUM questions, the answer might require understanding a paragraph
-    5. For HARD questions, look for specific details that a casual reader might miss
-    6. All wrong options must be plausible but clearly wrong based on the text
-    
-    Respond ONLY with valid JSON:
+    Respond ONLY with a valid JSON object in the format:
     {
       "questions": [
         {
-          "question": "Question text here",
+          "question": "Question text here...",
           "options": ["Option A", "Option B", "Option C", "Option D"],
           "correct": 0,
           "category": "${customCategory || 'General Knowledge'}",
@@ -634,173 +653,250 @@ async generateWithGroq(count, difficulty = 'medium', customCategory = null) {
       ]
     }`;
 
-    const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-      model: 'llama3-8b-8192',
-      messages: [{
-        role: 'system',
-        content: 'You are a quiz master who creates questions based ONLY on provided Wikipedia content. Never invent facts.'
+      const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+        model: 'llama3-8b-8192',
+        messages: [{
+          role: 'system',
+          content: 'You are a quiz master who creates questions based ONLY on provided text. You are precise and factual.'
+        }, {
+          role: 'user',
+          content: prompt
+        }],
+        temperature: 0.3, // Niedrige Temperatur für faktentreue Fragen
+        max_tokens: 2500
       }, {
-        role: 'user',
-        content: prompt
-      }],
-      temperature: 0.3, // Niedrigere Temperatur für faktentreue
-      max_tokens: 2000
-    }, {
-      headers: {
-        'Authorization': `Bearer ${this.groqApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      timeout: 30000
-    });
+        headers: {
+          'Authorization': `Bearer ${this.groqApiKey}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      });
 
-    const content = response.data.choices[0].message.content;
-    let parsed;
-    
-    try {
-      parsed = JSON.parse(content);
-    } catch (parseError) {
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsed = JSON.parse(jsonMatch[0]);
-      } else {
-        throw parseError;
+      const content = response.data.choices[0].message.content;
+      let parsed;
+      try {
+        parsed = JSON.parse(content);
+      } catch (parseError) {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          parsed = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error("Failed to parse JSON from LLM response.");
+        }
       }
-    }
 
-    if (!parsed.questions || parsed.questions.length === 0) {
+      if (!parsed.questions || parsed.questions.length === 0) {
+        return [];
+      }
+
+      const questions = parsed.questions.map(q => ({
+        ...q,
+        correct: parseInt(q.correct),
+        source: 'groq-wikipedia',
+        id: crypto.randomUUID(),
+        wikiVerified: true // Wir markieren diese als verifiziert, da sie aus dem Kontext stammen
+      }));
+
+      this.stats.fromGroq += questions.length;
+      this.stats.totalGenerated += questions.length;
+
+      // SCHRITT 5: Finale Qualitäts- und Verifizierungs-Checks.
+      const validated = validateQuestions(questions);
+      const verifiedQuestions = await this.verifyWithWikipedia(validated, wikiContext); // Strenge Verifizierung
+      const difficultyValidated = this.validateDifficultyLevel(verifiedQuestions, wikiContext);
+
+      scheduleDeepChecks(difficultyValidated);
+      return difficultyValidated;
+
+    } catch (error) {
+      console.error('Groq generation error:', error.response?.data || error.message);
+      this.stats.errors++;
       return [];
     }
-
-    const questions = parsed.questions.map(q => ({
-      question: q.question,
-      options: q.options,
-      correct: parseInt(q.correct),
-      category: q.category,
-      difficulty: q.difficulty,
-      source: 'groq-wikipedia',
-      id: crypto.randomUUID(),
-      wikiVerified: true
-    }));
-
-    this.stats.fromGroq += questions.length;
-    this.stats.totalGenerated += questions.length;
-
-    const validated = validateQuestions(questions);
-    
-    // Verifiziere Antworten gegen Wikipedia
-    const verifiedQuestions = await this.verifyWithWikipedia(validated, wikiContext);
-
-    // Validiere und korrigiere Schwierigkeitsgrade
-    const difficultyValidated = this.validateDifficultyLevel(verifiedQuestions, wikiContext);
-
-    scheduleDeepChecks(difficultyValidated);
-    return difficultyValidated;
-
-  } catch (error) {
-    console.error('Groq generation error:', error.response?.data || error.message);
-    this.stats.errors++;
-    return [];
   }
-}
+  async fetchWikipediaSearch(topic) {
+    if (!topic) return null;
 
-async fetchWikipediaContext(topic) {
-  if (!topic) return null;
-  
-  try {
-    // Suche nach Wikipedia-Artikel
-    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&list=search&srsearch=${encodeURIComponent(topic)}&srlimit=3`;
-    const searchResponse = await axios.get(searchUrl, { timeout: 5000 });
-    
-    if (!searchResponse.data.query.search.length) {
+    try {
+      // NEU: Wir holen die Top 3 Suchergebnisse, um eine Auswahl zu haben
+      const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&list=search&srsearch=${encodeURIComponent(topic)}&srlimit=3`;
+      const searchResponse = await axios.get(searchUrl, { timeout: 5000 });
+
+      if (!searchResponse.data.query.search || searchResponse.data.query.search.length === 0) {
+        console.log(`[Wiki] Keine Suchergebnisse für "${topic}" gefunden.`);
+        return null;
+      }
+
+      // Wir geben nur eine Liste der Titel zurück
+      const titles = searchResponse.data.query.search.map(result => result.title);
+      return titles;
+
+    } catch (error) {
+      console.error('[Wiki] Fehler bei der Artikelsuche:', error.message);
       return null;
     }
-
-    const pageTitle = searchResponse.data.query.search[0].title;
-    
-    // Hole den Artikelinhalt
-    const contentUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=0&explaintext=1&titles=${encodeURIComponent(pageTitle)}`;
-    const contentResponse = await axios.get(contentUrl, { timeout: 10000 });
-    
-    const pages = contentResponse.data.query.pages;
-    const pageId = Object.keys(pages)[0];
-    const extract = pages[pageId].extract;
-    
-    if (!extract) return null;
-    
-    // Begrenze auf die ersten 3000 Zeichen für bessere Relevanz
-    const limitedExtract = extract.slice(0, 3000);
-    
-    return `Article: ${pageTitle}\n\n${limitedExtract}`;
-    
-  } catch (error) {
-    console.error('Wikipedia fetch error:', error.message);
-    return null;
   }
-}
 
-async verifyWithWikipedia(questions, wikiContext) {
-  // Verifiziere jede Frage gegen den Wikipedia-Kontext
-  return questions.filter(q => {
+  async fetchWikipediaArticleContent(pageTitle) {
     try {
-      // Prüfe ob die richtige Antwort im Kontext erwähnt wird
-      const correctAnswer = q.options[q.correct].toLowerCase();
-      const contextLower = wikiContext.toLowerCase();
-      
-      // Sehr simple Verifikation - kann erweitert werden
-      if (contextLower.includes(correctAnswer) || 
-          contextLower.includes(q.question.toLowerCase().slice(0, 20))) {
-        return true;
+      const contentUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=0&explaintext=1&titles=${encodeURIComponent(pageTitle)}`;
+      const contentResponse = await axios.get(contentUrl, { timeout: 10000 });
+
+      const pages = contentResponse.data.query.pages;
+      const pageId = Object.keys(pages)[0];
+      const extract = pages[pageId].extract;
+
+      if (!extract) {
+        console.log(`[Wiki] Keinen Inhalt für Artikel "${pageTitle}" gefunden.`);
+        return null;
       }
-      
-      // Wenn die Antwort zu spezifisch ist, behalte sie trotzdem
-      if (q.difficulty === 'hard') {
-        return true;
-      }
-      
-      console.warn(`Question might not be verifiable: ${q.question.slice(0, 50)}...`);
-      return true; // Behalte sie trotzdem, aber markiere sie
-      
+
+      // Begrenze auf die ersten 4000 Zeichen für Relevanz und um den Prompt nicht zu überladen
+      const limitedExtract = extract.slice(0, 4000);
+      return `Article: ${pageTitle}\n\n${limitedExtract}`;
+
     } catch (error) {
-      return true; // Im Fehlerfall behalten
+      console.error(`[Wiki] Fehler beim Abrufen des Artikelinhalts für "${pageTitle}":`, error.message);
+      return null;
     }
-  });
-}
+  }
 
-validateDifficultyLevel(questions, wikiContext) {
-  return questions.map(q => {
-    const contextWords = wikiContext.toLowerCase().split(/\s+/);
-    const questionWords = q.question.toLowerCase().split(/\s+/);
-    const correctAnswer = q.options[q.correct].toLowerCase();
-    
-    // Zähle wie oft die Antwort im Text vorkommt
-    const answerMentions = contextWords.filter(word => 
-      correctAnswer.includes(word) || word.includes(correctAnswer)
-    ).length;
-    
-    // Zähle wie spezifisch die Frage ist (längere Fragen = spezifischer)
-    const questionSpecificity = questionWords.length;
-    
-    // Passe Schwierigkeit basierend auf Metriken an
-    let suggestedDifficulty = q.difficulty;
-    
-    if (answerMentions > 5 && questionSpecificity < 8) {
-      suggestedDifficulty = 'easy';
-    } else if (answerMentions === 1 || questionSpecificity > 15) {
-      suggestedDifficulty = 'hard';
-    } else {
-      suggestedDifficulty = 'medium';
+  async getBestWikipediaTitle(topic, titles) {
+    // Wenn es nur einen Titel gibt, nehmen wir den
+    if (titles.length === 1) {
+      return titles[0];
     }
-    
-    if (suggestedDifficulty !== q.difficulty) {
-      console.log(`Difficulty adjusted for question: "${q.question.slice(0,50)}..." from ${q.difficulty} to ${suggestedDifficulty}`);
-      q.difficulty = suggestedDifficulty;
-    }
-    
-    return q;
-  });
-}
 
-// ============== KOPIEREN SIE AB HIER ================
+    const prompt = `A user wants to play a quiz about the topic "${topic}". Which of the following Wikipedia articles is the most relevant context for the quiz?
+  
+  Available articles:
+  - ${titles.join('\n- ')}
+  
+  Please respond ONLY with the single, most relevant article title from the list above. Do not add any explanation.`;
+
+    try {
+      const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+        model: 'llama3-8b-8192', // Perfekt für schnelle Klassifizierungs-Aufgaben
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0, // Wir wollen eine deterministische, keine kreative Antwort
+        max_tokens: 50
+      }, {
+        headers: { 'Authorization': `Bearer ${this.groqApiKey}` },
+        timeout: 10000
+      });
+
+      const bestTitle = response.data.choices[0].message.content.trim();
+
+      // Sicherstellen, dass die KI einen Titel aus der Liste zurückgegeben hat
+      if (titles.includes(bestTitle)) {
+        console.log(`[Disambiguierung] Für "${topic}" wurde der Artikel "${bestTitle}" ausgewählt.`);
+        return bestTitle;
+      } else {
+        // Fallback: Wenn die KI etwas anderes antwortet, nehmen wir den ersten Titel
+        console.warn(`[Disambiguierung] KI-Antwort "${bestTitle}" war nicht in der Liste. Fallback auf ersten Titel.`);
+        return titles[0];
+      }
+    } catch (error) {
+      console.error('[Disambiguierung] Fehler bei der Titelauswahl:', error.message);
+      // Im Fehlerfall nehmen wir einfach den ersten Titel als Fallback
+      return titles[0];
+    }
+  }
+
+  async verifyWithWikipedia(questions, wikiContext) {
+    const verified = [];
+    const contextLower = wikiContext.toLowerCase();
+
+    for (const q of questions) {
+      try {
+        // Strenge Prüfung: Die korrekte Antwort muss im Text vorkommen.
+        const correctAnswer = q.options[q.correct];
+        if (contextLower.includes(correctAnswer.toLowerCase())) {
+          verified.push(q);
+        } else {
+          console.warn(`[Verification] Frage verworfen, da Antwort "${correctAnswer}" nicht im Kontext gefunden wurde. Frage: "${q.question}"`);
+        }
+      } catch (error) {
+        // Bei Fehlern die Frage lieber nicht aufnehmen.
+        console.warn(`[Verification] Fehler bei der Überprüfung einer Frage.`, error);
+      }
+    }
+    return verified;
+  }
+  validateDifficultyLevel(questions, wikiContext) {
+    const contextLower = wikiContext.toLowerCase();
+
+    return questions.map(q => {
+      // Weisen einen Score zu. Niedrig = einfach, Hoch = schwer.
+      let difficultyScore = 0;
+      const originalDifficulty = q.difficulty;
+
+      const questionLower = q.question.toLowerCase();
+      const questionWords = questionLower.split(/\s+/);
+      const correctAnswer = q.options[q.correct];
+      const incorrectAnswers = q.options.filter((_, i) => i !== q.correct);
+
+      // METRIK 1: Wie oft kommt die korrekte Antwort im Text vor?
+      const answerMentions = contextLower.split(correctAnswer.toLowerCase()).length - 1;
+      if (answerMentions > 5) {
+        difficultyScore -= 2; // Sehr häufige Antwort -> einfach
+      } else if (answerMentions === 1) {
+        difficultyScore += 2; // Seltene, spezifische Antwort -> schwer
+      } else if (answerMentions === 0) {
+        // Wenn die Antwort gar nicht im Text ist, ist die Frage wahrscheinlich fehlerhaft oder extrem schwer.
+        difficultyScore += 4;
+      }
+
+      // METRIK 2: Fragetyp (Warum/Wie vs. Wer/Was)
+      if (questionLower.startsWith('warum') || questionLower.startsWith('wieso') || questionLower.startsWith('wie')) {
+        difficultyScore += 2; // Transferwissen ist schwerer.
+      } else if (questionLower.startsWith('wer') || questionLower.startsWith('was') || questionLower.startsWith('welche') || questionLower.startsWith('wann')) {
+        difficultyScore -= 1; // Reines Faktenwissen ist einfacher.
+      }
+
+      // METRIK 3: Spezifität der Antwort (Eigennamen, Daten)
+      // Heuristik: Mehrere Großbuchstaben (Name) oder eine 4-stellige Zahl (Jahr) deuten auf spezifisches Wissen hin.
+      if (/\d{4}/.test(correctAnswer) || /(?:[A-ZÄÖÜ][a-zäöüß]+[\s-]){1,}/.test(correctAnswer)) {
+        difficultyScore += 2;
+      }
+
+      // METRIK 4: Plausibilität der falschen Optionen (Ablenker)
+      // Die intelligenteste Metrik: Sind die falschen Antworten auch relevant für das Thema?
+      let plausibleDistractors = 0;
+      for (const incorrect of incorrectAnswers) {
+        // Wenn eine falsche Antwort ebenfalls im Text vorkommt, ist sie ein guter Ablenker.
+        if (contextLower.includes(incorrect.toLowerCase())) {
+          plausibleDistractors++;
+        }
+      }
+      // Jede plausible falsche Antwort macht die Frage schwerer.
+      difficultyScore += plausibleDistractors;
+
+      // METRIK 5: Länge der Frage (als Annäherung an Komplexität)
+      if (questionWords.length > 18) difficultyScore += 1;
+      if (questionWords.length < 9) difficultyScore -= 1;
+
+      // Leite die finale Schwierigkeit vom Score ab
+      let suggestedDifficulty;
+      if (difficultyScore <= 1) {
+        suggestedDifficulty = 'easy';
+      } else if (difficultyScore >= 5) {
+        suggestedDifficulty = 'hard';
+      } else {
+        suggestedDifficulty = 'medium';
+      }
+
+      // Nur loggen und ändern, wenn es eine Abweichung gibt.
+      if (suggestedDifficulty !== originalDifficulty) {
+        console.log(`[Difficulty] Q: "${q.question.slice(0, 45)}...". Score: ${difficultyScore}. From ${originalDifficulty} -> ${suggestedDifficulty}`);
+        q.difficulty = suggestedDifficulty;
+        q.difficultyScore = difficultyScore; // Optional: Score für Debugging hinzufügen
+      }
+
+      return q;
+    });
+  }
+
 
 async fetchFromTriviaAPI(count, difficulty = 'medium') { // <--- HIER WURDE difficulty HINZUGEFÜGT
   try {
@@ -946,21 +1042,26 @@ async fetchFromTriviaAPI(count, difficulty = 'medium') { // <--- HIER WURDE diff
   deduplicateQuestions(questions, gameId) {
     const unique = [];
     const seen = new Set();
-    
+    const blacklist = blacklistManager.getBlacklist(); // Hol dir die aktuelle Blacklist
+
     for (const q of questions) {
+      // WICHTIGE PRÜFUNG: Frage darf nicht auf der Blacklist stehen.
+      if (blacklist.has(q.id)) {
+        continue; // Überspringe diese gemeldete Frage.
+      }
+
       const hash = this.hashQuestion(q.question);
-      
+
       if (!seen.has(hash) && !this.usedQuestions.has(hash)) {
-        if (q.reported) continue;  
+        // Die alte Prüfung auf `q.reported` ist nun redundant, da wir die ID-basierte Blacklist haben.
         unique.push(q);
         seen.add(hash);
         this.usedQuestions.add(hash);
       }
     }
-    
+
     return unique;
   }
-
   mapCategory(apiCategory) {
     const mapping = {
       'Geography': 'Geography',
@@ -1556,14 +1657,14 @@ socket.on('request-skip', (data) => {
     // If both players want to skip, skip the question
     if (game.skipRequests.length === 2) {
       console.log('Both players agreed to skip question');
-      
-      // Mark question as reported/problematic
+
       const currentQ = game.questions[game.currentQuestion];
       if (currentQ) {
         currentQ.reported = true;
         currentQ.reportReason = reason;
+        blacklistManager.reportQuestion(currentQ.id);
       }
-      
+
       // Move to next question
       gameManager.updateGame(gameId, {
         currentQuestion: game.currentQuestion + 1,
@@ -1576,7 +1677,7 @@ socket.on('request-skip', (data) => {
         skipRequests: [],
         skipRequestedBy: null
       });
-      
+
       io.to(gameId).emit('question-skipped');
       io.to(gameId).emit('game-updated', game);
     } else {
@@ -1650,11 +1751,13 @@ socket.on('request-post-answer-report', (data) => {
     // Wenn beide Spieler die Frage melden
     if (game.postAnswerReportRequests.length === 2) {
       console.log('Both players agreed to invalidate question in result phase.');
-      
+
       const currentQ = game.questions[game.currentQuestion];
       if (currentQ) {
         currentQ.reported = true;
         currentQ.reportReason = 'Invalid question - agreed by both in result phase';
+        // HIER IST DIE WICHTIGE ÄNDERUNG:
+        blacklistManager.reportQuestion(currentQ.id);
       }
 
       const updates = {
@@ -1929,7 +2032,7 @@ const findPlayerInGame = (gameId, socketId) => {
       }
       game.chatMessages.push(chatMessage);
       if (game.chatMessages.length > 50) {
-        game.chatMessages.slice(-50);
+        game.chatMessages = game.chatMessages.slice(-50); // Zuweisung hinzugefügt
       }
 
       // KORREKTUR: Sende die Nachricht an alle ANDEREN im Raum.
@@ -2014,11 +2117,20 @@ process.on('SIGINT', () => {
 
 // Server starten
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Groq API: ${questionService.groqApiKey ? 'Aktiviert' : 'Nicht konfiguriert'}`);
-});
+blacklistManager.loadBlacklist().then(() => {
+  // Starte den Server sofort, damit er Anfragen annehmen kann.
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server is running on port ${PORT}`);
+    console.log(`Groq API: ${questionService.groqApiKey ? 'Aktiviert' : 'Nicht konfiguriert'}`);
 
+    // HIER IST DIE WICHTIGE ÄNDERUNG:
+    // Führe das Vorfüllen im Hintergrund aus, NACHDEM der Server gestartet ist.
+    // Das verhindert, dass der Serverstart durch die API-Calls blockiert wird.
+    setTimeout(() => {
+      questionService.intelligentPrefill();
+    }, 1000); // Kurze Verzögerung, um sicherzustellen, dass alles initialisiert ist.
+  });
+});
 // Keep-Alive für Render
 setInterval(() => {
   console.log('Keep alive ping:', new Date().toISOString());
