@@ -1074,6 +1074,41 @@ app.get('/api/stats', (req, res) => {
   });
 });
 
+app.get('/api/random-topic', async (req, res) => {
+  try {
+    // Prüfen, ob der API-Schlüssel vorhanden ist
+    if (!questionService.groqApiKey) {
+      // Fallback auf eine statische Liste, falls keine KI verfügbar ist
+      const fallbackTopics = ['Marvel', 'SpongeBob', 'History', 'Science', 'Lord of the Rings', 'Harry Potter', 'Star Wars', 'Geography', '80s Music', 'Video Games'];
+      const randomTopic = fallbackTopics[Math.floor(Math.random() * fallbackTopics.length)];
+      return res.json({ topic: randomTopic });
+    }
+
+    const prompt = `Generate exactly one, single, creative, and fun quiz topic. The topic should be specific enough for a quiz. Examples: 'The History of LEGO', '80s Sci-Fi Films', 'The Chemistry of Coffee', 'Mythical Creatures of Japan'. Respond with ONLY the topic name and nothing else.`;
+
+    const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+      model: 'llama3-8b-8192',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 1.2, // Höhere Temperatur für mehr Kreativität
+      max_tokens: 50
+    }, {
+      headers: {
+        'Authorization': `Bearer ${questionService.groqApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 10000
+    });
+
+    const topic = response.data.choices[0].message.content.trim();
+    console.log('AI generated topic:', topic);
+    res.json({ topic });
+
+  } catch (error) {
+    console.error('Error generating random topic:', error.message);
+    res.status(500).json({ message: 'Could not generate a topic' });
+  }
+});
+
 app.get('/api/question-stats', (req, res) => {
   res.json(questionService.getStats());
 });

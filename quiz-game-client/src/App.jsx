@@ -48,6 +48,7 @@ const QuizGame = () => {
   const [canReportAfterAnswer, setCanReportAfterAnswer] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
 
+  const [isSuggestingTopic, setIsSuggestingTopic] = useState(false); // <-- DIESE ZEILE HINZUFÜGEN
 
   const [chatMessage, setChatMessage] = useState('');
 const [showChat, setShowChat] = useState(false);
@@ -518,6 +519,28 @@ const [showChat, setShowChat] = useState(false);
     }
   };
 
+  // Funktion, die ein zufälliges Thema von der KI holt
+  const suggestRandomTopic = async () => {
+    setIsSuggestingTopic(true); // Ladezustand aktivieren
+    setGameCategory(''); // Altes Thema löschen
+    try {
+      const response = await fetch(`${SOCKET_URL}/api/random-topic`);
+      if (!response.ok) {
+        throw new Error('Network response was not ok');
+      }
+      const data = await response.json();
+      setGameCategory(data.topic);
+    } catch (error) {
+      console.error("Failed to fetch random topic:", error);
+      // Fallback, falls der Server nicht antwortet
+      setGameCategory('General Knowledge');
+      // Optional: Zeige eine Fehlermeldung an
+      setConnectionError('Could not get a random topic.');
+    } finally {
+      setIsSuggestingTopic(false); // Ladezustand deaktivieren
+    }
+  };
+
   // --- Render Helper Components ---
 
   const renderChat = () => {
@@ -884,23 +907,32 @@ const [showChat, setShowChat] = useState(false);
                     </button>
                   </div>
                 </div>
-                
+
                 {/* Category Input */}
                 <div>
                   <label className="text-white text-sm mb-2 block">
-                    Topic/Category <span className="text-gray-400">(optional)</span>
+                    Topic/Category
                   </label>
-                  <input
-                    type="text"
-                    value={gameCategory}
-                    onChange={(e) => setGameCategory(e.target.value)}
-                    className="w-full p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-blue-400 focus:outline-none transition-all"
-                    placeholder="e.g. SpongeBob, Marvel, History..."
-                    maxLength={30}
-                  />
-                  <p className="text-gray-400 text-xs mt-1">Leave empty for general knowledge</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                        type="text"
+                        value={gameCategory}
+                        onChange={(e) => setGameCategory(e.target.value)}
+                        className="flex-1 p-3 rounded-xl bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-blue-400 focus:outline-none transition-all"
+                        placeholder="e.g. SpongeBob, Marvel, History..."
+                        maxLength={30}
+                    />
+                    {/* Der neue Button für den Zufallsvorschlag */}
+                    <button
+                        onClick={suggestRandomTopic}
+                        title="Suggest a random topic"
+                        disabled={isSuggestingTopic} // Deaktiviert den Button während des Ladens
+                        className="bg-white/20 p-3 rounded-xl hover:bg-white/30 transition-all text-white disabled:opacity-50 disabled:cursor-wait"
+                    >
+                      {isSuggestingTopic ? '🤔' : '🎲'}
+                    </button>
+                  </div>
                 </div>
-                
                 <button
                   onClick={createGame}
                   disabled={!isValidPlayerName(playerName) || !connected}
