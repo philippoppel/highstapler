@@ -276,12 +276,12 @@ const [showChat, setShowChat] = useState(false);
       localStorage.setItem('playerName', playerName);
     });
 
-    socketRef.current.on('chat-message', (data) => {
+    socketRef.current.on('chat-message', (msg) => {
       setGameData(prev => ({
         ...prev,
         chatMessages: [
           ...(prev.chatMessages || []),
-          { playerName, message: trimmed, timestamp: Date.now() }
+          { ...msg, timestamp: msg.timestamp ?? Date.now() }
         ]
       }));
       setChatMessage('');
