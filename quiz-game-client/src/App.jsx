@@ -131,19 +131,22 @@ const [showChat, setShowChat] = useState(false);
   }, [gameState, gameData.phase, focusLostTime]);
 
   const sendChatMessage = () => {
-    if (!chatMessage.trim() || !connected) {
-      console.log('Cannot send: no message or not connected');
-      return;
-    }
+    const trimmed = chatMessage.trim();
+    if (!trimmed || !connected) return;
 
-    console.log('Sending chat message:', { gameId, message: chatMessage.trim() });
+    socketRef.current.emit('chat-message', { gameId, message: trimmed });
 
-    socketRef.current.emit('chat-message', {
-      gameId,
-      message: chatMessage.trim()
-    });
+    setGameData(prev => ({
+      ...prev,
+      chatMessages: [
+        ...(prev.chatMessages || []),
+        { playerName, message: trimmed, timestamp: Date.now() }
+      ]
+    }));
+
     setChatMessage('');
   };
+
   // Determines connection quality based on ping
   const getConnectionQuality = () => {
     const timeSinceLastPing = Date.now() - lastPing;
