@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const cheerio = require('cheerio');
 const { validateQuestions, scheduleDeepChecks } = require('./qualityChecks');
 require('dotenv').config();
-const blacklistManager = require('./blacklistManager');
+const blacklistManager = require('./blacklistmanager');
 
 const app = express();
 const server = http.createServer(app);
