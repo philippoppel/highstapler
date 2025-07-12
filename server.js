@@ -1812,10 +1812,9 @@ socket.on('request-post-answer-report', (data) => {
 
     } else {
       // Nur den Zustand mit der ersten Meldung aktualisieren
-      gameManager.updateGame(gameId, {});
-      io.to(gameId).emit('game-updated', game);
+      const updatedGame = gameManager.updateGame(gameId, {});
+      io.to(gameId).emit('game-updated', updatedGame);
     }
-
   } catch (error) {
     handleSocketError(socket, error, 'request-post-answer-report');
   }
@@ -1872,109 +1871,100 @@ socket.on('cancel-skip', (data) => {
 
   // Nächste Runde
 // Durch diesen kompletten Block ersetzen
-socket.on('next-round', async (data) => {
-  try {
-    console.log('NEXT ROUND:', data);
-    const { gameId } = data;
-    const game = gameManager.getGame(gameId);
+  socket.on('next-round', async (data) => {
+    try {
+      console.log('NEXT ROUND:', data);
+      const { gameId } = data;
+      let game = gameManager.getGame(gameId); // 'let' statt 'const' um Neuzuweisung zu erlauben
 
-    if (!game) return;
+      if (!game) return;
 
-    let updates = {};
-    
-    // Check win conditions BEFORE updating anything
-    const challengerReached5 = game.challengerScore >= 5;
-    const moderatorReached5 = game.moderatorScore >= 5;
-    const challengerOutOfCoins = game.challengerCoins <= 0;
-    
-    // Check if both reached 5 - if yes, higher score wins
-    let gameFinished = false;
-    let winner = null;
-    
-    if (challengerOutOfCoins) {
-      gameFinished = true;
-      winner = game.moderatorName;
-    } else if (challengerReached5 && moderatorReached5) {
-      // Both have 5+ points - check who has more
-      if (game.challengerScore > game.moderatorScore) {
-        gameFinished = true;
-        winner = game.challengerName;
-      } else if (game.moderatorScore > game.challengerScore) {
+      let updates = {};
+
+      // Check win conditions
+      const challengerReached5 = game.challengerScore >= 5;
+      const moderatorReached5 = game.moderatorScore >= 5;
+      const challengerOutOfCoins = game.challengerCoins <= 0;
+
+      let gameFinished = false;
+      let winner = null;
+
+      if (challengerOutOfCoins) {
         gameFinished = true;
         winner = game.moderatorName;
+      } else if (challengerReached5 && !moderatorReached5) {
+        gameFinished = true;
+        winner = game.challengerName;
+      } else if (moderatorReached5 && !challengerReached5) {
+        gameFinished = true;
+        winner = game.moderatorName;
+      } else if (challengerReached5 && moderatorReached5) {
+        if (game.challengerScore > game.moderatorScore) {
+          gameFinished = true;
+          winner = game.challengerName;
+        } else if (game.moderatorScore > game.challengerScore) {
+          gameFinished = true;
+          winner = game.moderatorName;
+        }
       }
-      // If equal, game continues
-    } else if (challengerReached5 && !moderatorReached5) {
-      gameFinished = true;
-      winner = game.challengerName;
-    } else if (moderatorReached5 && !challengerReached5) {
-      gameFinished = true;
-      winner = game.moderatorName;
-    }
-    
-    if (gameFinished && winner) {
-      
-      updates.state = 'finished';
-      updates.winner = winner;
-      updates.endTime = Date.now();
-      
-      console.log(`Game ${gameId} finished! Winner: ${winner}`);
-      console.log(`Final Score - ${game.challengerName}: ${game.challengerScore}, ${game.moderatorName}: ${game.moderatorScore}`);
-      console.log(`Challenger coins left: ${game.challengerCoins}`);
-      
-      // Clean up sessions after a delay (but don't delete immediately)
-      setTimeout(() => {
-        const sessions = sessionManager.findSessionsByGame(gameId);
-        sessions.forEach(session => {
-          sessionManager.deleteSession(session.id);
-        });
-        gameManager.deleteGame(gameId);
-        console.log(`Game ${gameId} and sessions cleaned up`);
-      }, 60000); // 1 minute delay to allow players to see the result
-      
-    } else {
-      // Continue to next round
-      updates.currentQuestion = game.currentQuestion + 1;
-      
-      // Load more questions if needed
-      if (game.currentQuestion >= game.questions.length - 5) {
-        const newQuestions = await questionService.getQuestions(10, gameId, game.settings);
-        game.questions.push(...newQuestions);
-        console.log(`${newQuestions.length} new questions added to game ${gameId}`);
+
+      if (gameFinished && winner) {
+        updates.state = 'finished';
+        updates.winner = winner;
+        updates.endTime = Date.now();
+
+        console.log(`Game ${gameId} finished! Winner: ${winner}`);
+
+        setTimeout(() => {
+          const sessions = sessionManager.findSessionsByGame(gameId);
+          sessions.forEach(session => sessionManager.deleteSession(session.id));
+          gameManager.deleteGame(gameId);
+          console.log(`Game ${gameId} and sessions cleaned up`);
+        }, 60000);
+
+      } else {
+        // Continue to next round
+        updates.currentQuestion = game.currentQuestion + 1;
+
+        if (game.currentQuestion >= game.questions.length - 5) {
+          const newQuestions = await questionService.getQuestions(10, gameId, game.settings);
+          game.questions.push(...newQuestions);
+          console.log(`${newQuestions.length} new questions added to game ${gameId}`);
+        }
+
+        // Reset for new round - Das war schon korrekt!
+        updates.phase = 'answering';
+        updates.challengerAnswer = '';
+        updates.moderatorAnswer = '';
+        updates.challengerAnswered = false;
+        updates.moderatorAnswered = false;
+        updates.challengerCorrect = false;
+        updates.decision = '';
+        updates.roundResult = '';
+        updates.showModeratorAnswer = false;
+        updates.skipRequests = [];
+        updates.skipRequestedBy = null;
+        updates.postAnswerReportRequests = [];
+        updates.postAnswerReportRequestedBy = null;
+        updates.roundInvalidated = false;
       }
-      
-      // Reset for new round
-      updates.phase = 'answering';
-      updates.challengerAnswer = '';
-      updates.moderatorAnswer = '';
-      updates.challengerAnswered = false;
-      updates.moderatorAnswered = false;
-      updates.challengerCorrect = false;
-      updates.decision = '';
-      updates.roundResult = '';
-      updates.showModeratorAnswer = false;
-      updates.skipRequests = [];
-      updates.skipRequestedBy = null;
-      updates.postAnswerReportRequests = []; // NEW
-      updates.postAnswerReportRequestedBy = null; // NEW
-      updates.roundInvalidated = false; // <--- DIESE ZEILE HINZUFÜGEN
+
+      // === KORREKTUR HIER ===
+      // 1. Speichere den aktualisierten Zustand in einer neuen Variable.
+      const updatedGame = gameManager.updateGame(gameId, updates);
+      // 2. Sende diese neue Variable an die Clients.
+      io.to(gameId).emit('game-updated', updatedGame);
+
+      if (updatedGame.state === 'finished') {
+        console.log(`Broadcasting game finished for ${gameId}`);
+      } else {
+        console.log(`Next round - Question: ${updatedGame.currentQuestion}, State: ${updatedGame.state}`);
+      }
+
+    } catch (error) {
+      handleSocketError(socket, error, 'next-round');
     }
-
-    // Update game and notify all clients
-    gameManager.updateGame(gameId, updates);
-    io.to(gameId).emit('game-updated', game);
-    
-    if (gameFinished) {
-      console.log(`Broadcasting game finished for ${gameId}`);
-    } else {
-      console.log(`Next round - Question: ${game.currentQuestion}, State: ${game.state}`);
-    }
-
-  } catch (error) {
-    handleSocketError(socket, error, 'next-round');
-  }
-});
-
+  });
   // Spieler disconnect
   socket.on('disconnect', () => {
     console.log('Player disconnected:', socket.id);
