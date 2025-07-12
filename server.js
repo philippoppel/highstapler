@@ -623,8 +623,8 @@ if (this.questionCache.length > 0) {
         return [];
       }
 
-      // SCHRITT 4: Generiere die Fragen mit dem präzisen Kontext und einem verbesserten Prompt.
-      const prompt = `Based STRICTLY on the following Wikipedia article content, generate ${count} high-quality, multiple-choice quiz questions about "${customCategory}".
+// SCHRITT 4: Generiere die Fragen mit dem präzisen Kontext und einem verbesserten Prompt.
+      const prompt = `Based STRICTLY on the following Wikipedia article content, generate ${count} DIVERSE and DISTINCT high-quality, multiple-choice quiz questions about "${customCategory}".
     
     WIKIPEDIA CONTEXT:
     """
@@ -637,8 +637,9 @@ if (this.questionCache.length > 0) {
     1.  **Use ONLY information from the provided WIKIPEDIA CONTEXT.** Do not invent facts or use any outside knowledge.
     2.  The correct answer MUST be explicitly verifiable from the text.
     3.  Wrong options should be plausible but clearly incorrect according to the text.
-    4.  **For the topic "${customCategory}", if it's ambiguous, focus on the context of the article (e.g., for "Marvel", focus on comics/movies, NOT the dictionary word).**
-    5.  Ensure the questions are distinct and not repetitive.
+    4.  **Generate a wide variety of questions.** Cover different aspects, facts, and details mentioned throughout the entire text.
+    5.  **DO NOT REPEAT QUESTIONS.** Each question must test a different fact. Do not ask the same thing with slightly different wording.
+    6.  For the topic "${customCategory}", if it's ambiguous, focus on the context of the article (e.g., for "Marvel", focus on comics/movies, NOT the dictionary word).
     
     Respond ONLY with a valid JSON object in the format:
     {
@@ -652,7 +653,6 @@ if (this.questionCache.length > 0) {
         }
       ]
     }`;
-
       const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
         model: 'llama3-8b-8192',
         messages: [{
@@ -739,20 +739,38 @@ if (this.questionCache.length > 0) {
 
   async fetchWikipediaArticleContent(pageTitle) {
     try {
-      const contentUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=0&explaintext=1&titles=${encodeURIComponent(pageTitle)}`;
+      // NEU: Wir laden das komplette HTML des Artikels via "action=parse"
+      const contentUrl = `https://en.wikipedia.org/w/api.php?action=parse&format=json&page=${encodeURIComponent(pageTitle)}&prop=text&formatversion=2`;
+
       const contentResponse = await axios.get(contentUrl, { timeout: 10000 });
 
-      const pages = contentResponse.data.query.pages;
-      const pageId = Object.keys(pages)[0];
-      const extract = pages[pageId].extract;
-
-      if (!extract) {
-        console.log(`[Wiki] Keinen Inhalt für Artikel "${pageTitle}" gefunden.`);
+      const htmlContent = contentResponse.data.parse.text;
+      if (!htmlContent) {
+        console.log(`[Wiki] Keinen HTML-Inhalt für Artikel "${pageTitle}" gefunden.`);
         return null;
       }
 
-      // Begrenze auf die ersten 4000 Zeichen für Relevanz und um den Prompt nicht zu überladen
-      const limitedExtract = extract.slice(0, 4000);
+      // NEU: Wir nutzen Cheerio, um den reinen Text aus dem HTML zu extrahieren
+      const $ = cheerio.load(htmlContent);
+
+      // Entferne störende Elemente wie Referenzen, Tabellen, Infoboxen
+      $('.reference, .reflist, .thumb, .infobox, .gallery, table').remove();
+
+      // Extrahiere den Text aus allen Absätzen (<p>)
+      let articleText = '';
+      $('p').each((i, elem) => {
+        articleText += $(elem).text().trim() + '\n\n';
+      });
+
+      if (!articleText) {
+        console.log(`[Wiki] Konnte keinen Text aus <p>-Tags für "${pageTitle}" extrahieren.`);
+        return null;
+      }
+
+      // Begrenze auf ca. 6000 Zeichen, um das Kontextfenster der KI nicht zu sprengen
+      const limitedExtract = articleText.slice(0, 6000);
+      console.log(`[Wiki] Erfolgreich ${limitedExtract.length} Zeichen Kontext für "${pageTitle}" geladen.`);
+
       return `Article: ${pageTitle}\n\n${limitedExtract}`;
 
     } catch (error) {
@@ -760,7 +778,6 @@ if (this.questionCache.length > 0) {
       return null;
     }
   }
-
   async getBestWikipediaTitle(topic, titles) {
     // Wenn es nur einen Titel gibt, nehmen wir den
     if (titles.length === 1) {
